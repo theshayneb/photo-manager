@@ -1026,3 +1026,83 @@ def test_video_preview_shows_thumbnail_and_marks_before_playing(window):
     center = image.pixelColor(image.width() // 2, image.height() // 2)
     assert (center.red(), center.green(), center.blue()) != (0, 0, 0)  # not black
     win.close_preview()
+
+
+def test_move_while_previewing_shows_the_next_photo(window, tmp_path, monkeypatch):
+    """Regression: Move to… in the big preview moved the file but kept showing it."""
+    win, folder, _ = window
+    from photo_manager.ui import main_window
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    class FakeMove:
+        def __init__(self, *a, **k):
+            self.folder = str(dest)
+
+        def exec(self):
+            return True
+
+    monkeypatch.setattr(main_window, "MoveDialog", FakeMove)
+    path = str(folder / "IMG_20261023_000100_358_3.jpg")
+    win.grid.select_paths([path], current=path)
+    win.open_preview()
+    win.move_selected()
+    settle(win)
+    assert (dest / "IMG_20261023_000100_358_3.jpg").exists() and not os.path.exists(path)
+    assert win.previewing and win.preview.path != path
+    assert os.path.exists(win.preview.path)
+    assert win.grid.current_path() == win.preview.path  # sidebar/labels follow the shown photo
+
+
+def test_rename_while_previewing_keeps_showing_it(window, monkeypatch):
+    win, folder, _ = window
+    from photo_manager.ui import main_window
+
+    class FakeRename:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return True
+
+        def new_name(self):
+            return "renamed.jpg"
+
+    monkeypatch.setattr(main_window, "RenameDialog", FakeRename)
+    path = str(folder / "vacation.jpg")
+    win.grid.select_paths([path], current=path)
+    win.open_preview()
+    win.rename_current()
+    settle(win)
+    assert win.preview.path == str(folder / "renamed.jpg")
+    assert "renamed.jpg" in win.preview.caption.text()
+
+
+def test_move_in_preview_acts_on_the_shown_photo_even_if_nothing_is_selected(window, tmp_path, monkeypatch):
+    """Regression: Move to… used the hidden grid's selection; with nothing selected it did nothing."""
+    win, folder, _ = window
+    from photo_manager.ui import main_window
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    class FakeMove:
+        def __init__(self, *a, **k):
+            self.folder = str(dest)
+
+        def exec(self):
+            return True
+
+    monkeypatch.setattr(main_window, "MoveDialog", FakeMove)
+    path = str(folder / "vacation.jpg")
+    win.grid.select_paths([path], current=path)
+    win.open_preview()
+    win.grid.selectionModel().clearSelection()  # e.g. after clicking around
+    assert win.grid.selected_paths() == []
+    win.move_selected()
+    settle(win)
+    assert (dest / "vacation.jpg").exists() and not os.path.exists(path)
+    assert win.model.item(path) is None  # gone from the grid too
+    win.close_preview()
+    assert path not in [i.path for i in win.model.items]

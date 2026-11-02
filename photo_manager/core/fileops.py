@@ -48,11 +48,68 @@ def move(paths: list[str], folder: str) -> tuple[dict[str, str], list[tuple[str,
             continue
         try:
             dest = unique_path(dest_dir / src.name)
-            shutil.move(str(src), str(dest))
+            move_one(str(src), str(dest))
             moved[path] = str(dest)
         except OSError as exc:
-            failures.append((path, str(exc)))
+            failures.append((path, friendly_error(exc)))
     return moved, failures
+
+
+IN_USE_RETRY_SECONDS = 3.0
+
+
+def _is_in_use(exc: OSError) -> bool:
+    # Windows: 32 = sharing violation, 33 = lock violation, 5 = access denied (often a brief lock)
+    return getattr(exc, "winerror", None) in (5, 32, 33) or isinstance(exc, PermissionError)
+
+
+def _is_other_drive(exc: OSError) -> bool:
+    import errno
+
+    return exc.errno == errno.EXDEV or getattr(exc, "winerror", None) == 17
+
+
+def move_one(src: str, dest: str, retry_seconds: float | None = None) -> None:
+    """Move one file. A file that's briefly in use (e.g. a video that just stopped playing)
+    is retried for a few seconds. Copy-then-delete is only used across drives, and if the
+    original can't be deleted the copy is removed again, so a file never ends up in two places."""
+    import time
+
+    if retry_seconds is None:
+        retry_seconds = IN_USE_RETRY_SECONDS
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        try:
+            os.rename(src, dest)
+            return
+        except OSError as exc:
+            if _is_other_drive(exc):
+                break
+            if _is_in_use(exc) and time.monotonic() < deadline:
+                time.sleep(0.25)
+                continue
+            raise
+    # Different drive: copy, then delete the original (retrying if it's briefly in use).
+    shutil.copy2(src, dest)
+    while True:
+        try:
+            os.remove(src)
+            return
+        except OSError as exc:
+            if _is_in_use(exc) and time.monotonic() < deadline:
+                time.sleep(0.25)
+                continue
+            try:
+                os.remove(dest)  # don't leave a second copy behind
+            except OSError:
+                pass
+            raise
+
+
+def friendly_error(exc: OSError) -> str:
+    if _is_in_use(exc):
+        return "the file is in use by another program (close it there and try again)"
+    return str(exc)
 
 
 def copy(paths: list[str], folder: str) -> tuple[dict[str, str], list[tuple[str, str]]]:

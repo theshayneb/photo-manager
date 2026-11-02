@@ -62,3 +62,45 @@ def test_settings_round_trip(tmp_path):
     s.save()
     again = Settings.load(path)
     assert again.templates[-1].name == "Mine" and again.keyword_sets["Trips"] == ["paris"]
+
+
+def test_move_retries_while_a_file_is_briefly_in_use(tmp_path, monkeypatch):
+    src, dest = tmp_path / "a.mp4", tmp_path / "out" / "a.mp4"
+    src.write_bytes(b"video")
+    dest.parent.mkdir()
+    real_rename = fileops.os.rename
+    attempts = []
+
+    def flaky_rename(a, b):
+        attempts.append(1)
+        if len(attempts) < 3:  # "in use" for the first two tries, like a just-stopped video
+            raise PermissionError(32, "The process cannot access the file")
+        return real_rename(a, b)
+
+    monkeypatch.setattr(fileops.os, "rename", flaky_rename)
+    fileops.move_one(str(src), str(dest), retry_seconds=5)
+    assert dest.read_bytes() == b"video" and not src.exists() and len(attempts) == 3
+
+
+def test_failed_move_never_leaves_two_copies(tmp_path, monkeypatch):
+    import errno
+
+    src, dest = tmp_path / "a.jpg", tmp_path / "out" / "a.jpg"
+    src.write_bytes(b"photo")
+    dest.parent.mkdir()
+
+    def other_drive(a, b):
+        raise OSError(errno.EXDEV, "different drive")
+
+    def locked_remove(p):
+        if str(p) == str(src):
+            raise PermissionError(32, "in use")
+        return real_remove(p)
+
+    real_remove = fileops.os.remove
+    monkeypatch.setattr(fileops.os, "rename", other_drive)
+    monkeypatch.setattr(fileops.os, "remove", locked_remove)
+    monkeypatch.setattr(fileops, "IN_USE_RETRY_SECONDS", 0.3)
+    moved, failures = fileops.move([str(src)], str(dest.parent))
+    assert not moved and failures and "in use" in failures[0][1]
+    assert src.exists() and not dest.exists()  # original kept, no stray copy

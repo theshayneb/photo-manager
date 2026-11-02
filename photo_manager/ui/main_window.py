@@ -578,7 +578,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- convert
 
     def convert_selected(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         if not any(needs_conversion(p, t) for p in paths for t in ("JPG", "PNG")):
             QMessageBox.information(self, "Convert", "Select some images to convert first.")
             return
@@ -748,6 +748,17 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------- file ops
 
+    def action_paths(self) -> list[str]:
+        """The files an action (move, delete, rename, convert, copy) applies to.
+
+        In the big preview that's always the photo being shown (the active one when
+        comparing), whatever happens to be selected in the hidden grid."""
+        if self.previewing and self.preview.path and self.model.item(self.preview.path):
+            path = self.preview.path
+            self.grid.select_paths([path], current=path)
+            return [path]
+        return self.grid.selected_paths()
+
     def _after_removal(self, removed: list[str]) -> None:
         gone = {_key(p) for p in removed}
         current = self.grid.current_path()
@@ -767,9 +778,11 @@ class MainWindow(QMainWindow):
         self.regroup(select=[target] if target else [], current=target)
         self._show_count()
         self.refresh_sidebar()
+        if self.previewing:  # moved / deleted / converted away: show the next one
+            self._preview_show_current()
 
     def delete_selected(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         if not paths:
             return
         if self.settings.confirm_delete:
@@ -791,13 +804,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Delete", error or "\n".join(f"{p}: {e}" for p, e in failures[:10]))
             if self.viewer and self.viewer.isVisible():
                 self._viewer_show_current()
-            if self.previewing:
-                self._preview_show_current()
 
         self.bg.run(lambda: fileops.recycle(paths), done)
 
     def move_selected(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         if not paths:
             return
         dlg = MoveDialog(self.settings.favorites, self.settings.recent_move_folders,
@@ -851,17 +862,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1500, check)
 
     def rename_files(self, plan: dict[str, str]) -> None:
-        reload_video = self._release_video(list(plan))
+        self._release_video(list(plan))
         def done(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
             if error:
                 QMessageBox.warning(self, "Rename", error)
                 return
             renamed, failures = result
             self.model.rename_paths(renamed)
-            if reload_video and self.previewing:
-                self.grid.select_paths(list(renamed.values())[:1] or list(plan)[:1])
-                self._preview_show_current()
             self.regroup(select=list(renamed.values()) + [p for p, _ in failures])
+            if self.previewing:  # keep previewing the same photo under its new name
+                self.compare_paths = [renamed.get(p, p) for p in self.compare_paths]
+                active = renamed.get(self.preview.path, self.preview.path)
+                self.grid.select_paths([active], current=active)
+                self._preview_show_current()
             self._show_count()
             self.status.setText(self.status.text() + f"   ·   Renamed {len(renamed)} file(s).")
             if failures:
@@ -1015,7 +1028,7 @@ class MainWindow(QMainWindow):
         self.grid.select_paths(header.paths)
 
     def rename_current(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         path = self.grid.current_path() if len(paths) != 1 else paths[0]
         if not path:
             return
@@ -1027,7 +1040,7 @@ class MainWindow(QMainWindow):
             self.rename_files({path: new_path})
 
     def copy_files(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         if not paths:
             return
         data = QMimeData()
@@ -1037,7 +1050,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Copied {len(paths)} file(s) — paste them in Explorer.")
 
     def copy_paths(self) -> None:
-        paths = self.grid.selected_paths()
+        paths = self.action_paths()
         QApplication.clipboard().setText("\n".join(os.path.normpath(p) for p in paths))
 
     def crop_current(self) -> None:

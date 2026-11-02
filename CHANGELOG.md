@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3
+
+- Fixed: **Move to…** in the big preview could do nothing. Actions used the (hidden) grid selection; in the
+  preview, Move to…, Delete, Rename, Convert and Copy now always act on the photo being shown (the active one
+  when comparing).
+- After a move/delete in the preview it goes on to the next photo; after a rename it keeps showing the photo.
+- Moving a file that's briefly in use (e.g. a video that just stopped) is retried for a few seconds, and a move
+  never leaves a copy in both places. Clearer "in use by another program" message if it still can't move.
+
 ## 0.8.2
 
 - Videos in the big preview show their thumbnail until you press play (instead of a black box), and the file-type
