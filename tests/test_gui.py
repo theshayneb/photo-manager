@@ -467,7 +467,9 @@ def test_copy_files_to_clipboard(window):
     select(win, "vacation.jpg")
     win.copy_files()
     urls = QApplication.clipboard().mimeData().urls()
-    assert [u.toLocalFile() for u in urls] == [str(folder / "vacation.jpg")]
+    # Qt may use forward slashes on Windows; it's the same file.
+    assert [os.path.normcase(os.path.normpath(u.toLocalFile())) for u in urls] == [
+        os.path.normcase(str(folder / "vacation.jpg"))]
 
 
 def test_collapsible_groups(window):
