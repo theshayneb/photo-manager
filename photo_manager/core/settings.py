@@ -56,6 +56,7 @@ class Settings:
     thumb_info: list[str] = field(default_factory=lambda: ["date"])
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
+    crop_as_copy: bool = False
     window_geometry: str = ""
     window_state: str = ""
 

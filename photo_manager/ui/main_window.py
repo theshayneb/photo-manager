@@ -14,10 +14,11 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
-    QSlider, QSplitter, QToolBar, QTreeView, QVBoxLayout, QWidget,
+    QSlider, QSplitter, QStackedWidget, QToolBar, QTreeView, QVBoxLayout, QWidget,
 )
 
 from ..core import dates, fileops
+from ..core.crop import save_crop
 from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
@@ -25,16 +26,19 @@ from .dialogs import MoveDialog, TemplateDialog
 from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
 from .panels import PANELS, Sidebar
 from .theme import THEMES, apply_theme
+from .preview import PreviewPane
 from .viewer import Viewer
 from .workers import Background
 
 META_CHUNK = 100
 
 STYLE = """
-QPushButton[keyword="true"] { padding: 4px 6px; }
+QPushButton[keyword="true"] { padding: 2px 8px; min-width: 0px; min-height: 18px;
+    border: 1px solid palette(mid); border-radius: 10px; background-color: palette(button); }
+QPushButton[keyword="true"]:hover { border-color: palette(highlight); }
 QPushButton[keyword="true"][state="all"] {
-    background-color: palette(highlight); color: palette(highlighted-text); font-weight: bold; }
-QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); }
+    background-color: palette(highlight); color: palette(highlighted-text); border-color: palette(highlight); }
+QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); padding: 1px 7px; }
 QPushButton[chip="true"] { padding: 2px 8px; }
 QLabel[hint="true"] { color: gray; }
 QToolButton[section="true"] { font-weight: bold; text-align: left; padding: 4px; border: none;
@@ -68,7 +72,15 @@ class MainWindow(QMainWindow):
         self.grid.set_info_fields(settings.thumb_info)
         self.grid.selectionModel().selectionChanged.connect(lambda *_: self._schedule_refresh())
         self.grid.activated.connect(lambda _idx: self.open_viewer())
-        self.setCentralWidget(self.grid)
+        self.preview = PreviewPane(settings)
+        self.preview.closed.connect(self.close_preview)
+        self.preview.navigate.connect(self._preview_step)
+        self.preview.delete_requested.connect(self._preview_delete)
+        self.preview.crop_requested.connect(self.crop_file)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.grid)
+        self.stack.addWidget(self.preview)
+        self.setCentralWidget(self.stack)
 
         self._build_folders()
         self._build_sidebar()
@@ -294,6 +306,9 @@ class MainWindow(QMainWindow):
             sc.activated.connect(lambda name=label: self._label_shortcut(name))
         clear = QShortcut(QKeySequence("Ctrl+0"), self)
         clear.activated.connect(lambda: self._label_shortcut(""))
+        preview = QShortcut(QKeySequence("Shift+P"), self.grid)
+        preview.setContext(Qt.ShortcutContext.WidgetShortcut)
+        preview.activated.connect(self.open_preview)
 
     # -------------------------------------------------------------- options
 
@@ -407,10 +422,7 @@ class MainWindow(QMainWindow):
         self.settings.last_folder = folder
         self.address.setText(folder)
         self._update_fav_button()
-        index = self.fs_model.index(folder)
-        if index.isValid():
-            self.tree.setCurrentIndex(index)
-            self.tree.scrollTo(index)
+        # The folder tree is left alone (no auto-expanding to the open folder).
         self.grid.scrollToTop()
         first = self.model.first_item_row()
         if first >= 0:
@@ -579,6 +591,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Delete", error or "\n".join(f"{p}: {e}" for p, e in failures[:10]))
             if self.viewer and self.viewer.isVisible():
                 self._viewer_show_current()
+            if self.previewing:
+                self._preview_show_current()
 
         self.bg.run(lambda: fileops.recycle(paths), done)
 
@@ -681,6 +695,83 @@ class MainWindow(QMainWindow):
         if path:
             self.grid.select_paths([path], current=path)
             self.delete_selected()
+
+    # ------------------------------------------------------- preview / crop
+
+    @property
+    def previewing(self) -> bool:
+        return self.stack.currentWidget() is self.preview
+
+    def open_preview(self) -> None:
+        if not self.grid.current_path():
+            return
+        self.stack.setCurrentWidget(self.preview)
+        self._preview_show_current()
+        self.preview.setFocus()
+
+    def close_preview(self) -> None:
+        self.preview.cancel_crop()
+        self.stack.setCurrentWidget(self.grid)
+        path = self.grid.current_path()
+        if path:
+            self.grid.scrollTo(self.model.index(self.model.row_of(path)))
+        self.grid.setFocus()
+
+    def _caption(self, item: Item) -> str:
+        position = next((n for n, i in enumerate(self.model.items) if i is item), 0)
+        parts = [f"{position + 1} / {len(self.model.items)}", f"<b>{item.name}</b>"]
+        if item.meta and item.meta.date_taken:
+            parts.append(dates.format_display(item.meta.date_taken, self.settings.display_format))
+        if item.meta and item.meta.label:
+            parts.append(item.meta.label)
+        return "   ·   ".join(parts)
+
+    def _preview_show_current(self) -> None:
+        path = self.grid.current_path()
+        item = self.model.item(path) if path else None
+        if not item:
+            self.close_preview()
+            return
+        self.preview.show_item(item.path, item.kind, self._caption(item))
+        self.refresh_sidebar()
+
+    def _preview_step(self, delta: int) -> None:
+        path = self.grid.current_path()
+        target = self.model.neighbour(path, delta) if path else None
+        if target:
+            self.grid.select_paths([target.path], current=target.path)
+            self._preview_show_current()
+
+    def _preview_delete(self) -> None:
+        path = self.grid.current_path()
+        if path:
+            self.grid.select_paths([path], current=path)
+            self.delete_selected()
+
+    def crop_file(self, path: str, box: tuple, as_copy: bool) -> None:
+        et = self.et
+        self.status.setText("Saving crop…")
+
+        def done(new_path, error: str | None) -> None:  # type: ignore[no-untyped-def]
+            if error:
+                QMessageBox.warning(self, "Crop", f"The crop wasn't saved:\n{error}")
+                self.status.setText("Crop not saved.")
+                return
+            if as_copy:
+                self.model.add_path(new_path)
+                self.regroup(select=[new_path], current=new_path)
+                self._show_count()
+                self.status.setText(f"Saved cropped copy: {os.path.basename(new_path)}")
+            else:
+                self.model.refresh_file(new_path)
+                self.model.reload_thumb(new_path)
+                self.status.setText("Cropped. The original is in the Recycle Bin.")
+            self._load_meta([new_path])
+            if self.previewing:
+                self._preview_show_current()
+            self.refresh_sidebar()
+
+        self.bg.run(lambda: save_crop(path, box, et, as_copy), done)
 
     # ---------------------------------------------------------------- close
 

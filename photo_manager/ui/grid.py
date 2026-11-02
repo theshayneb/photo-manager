@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from PIL import Image
@@ -117,8 +117,24 @@ def group_key(item: Item, group_by: str, week_start: str) -> tuple[tuple, str]:
     offset = (dt.weekday() + 1) % 7 if week_start == "sunday" else dt.weekday()
     start = (dt - timedelta(days=offset)).date()
     end = start + timedelta(days=6)
-    title = f"Week of {start:%a, %b} {start.day}, {start.year}  –  {end:%a, %b} {end.day}"
+    year, number = week_number(start, week_start)
+    title = (f"Week {number}  ·  {start:%a, %b} {start.day}  –  {end:%a, %b} {end.day}, {end.year}")
     return ((0, start.toordinal()), title)
+
+
+def week_number(week_start_day: date, week_start: str) -> tuple[int, int]:
+    """(year, week number) for a week beginning on week_start_day.
+
+    Monday weeks use ISO 8601 numbering. Sunday weeks use the US convention:
+    week 1 is the week containing January 1.
+    """
+    if week_start == "monday":
+        iso = week_start_day.isocalendar()
+        return iso[0], iso[1]
+    year = (week_start_day + timedelta(days=6)).year  # the week belongs to the year it ends in
+    jan1 = date(year, 1, 1)
+    first = jan1 - timedelta(days=(jan1.weekday() + 1) % 7)
+    return year, (week_start_day - first).days // 7 + 1
 
 
 class PhotoModel(QAbstractListModel):
@@ -315,6 +331,26 @@ class PhotoModel(QAbstractListModel):
         except OSError:
             pass
 
+    def add_path(self, path: str) -> Item | None:
+        """Add a new file (e.g. a cropped copy). Callers regroup() afterwards."""
+        k = kind(path)
+        if not k or self.item(path):
+            return None
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        item = Item(path, k, st.st_size, st.st_mtime)
+        self.items.append(item)
+        return item
+
+    def reload_thumb(self, path: str) -> None:
+        """The image itself changed (e.g. cropped): drop the thumbnail so it's remade."""
+        item = self.item(path)
+        if item:
+            item.thumb, item.thumb_state = None, "none"
+            self._changed(self.row_of(path))
+
     def remove_paths(self, paths: list[str]) -> None:
         gone = {os.path.normcase(p) for p in paths}
         self.items = [i for i in self.items if os.path.normcase(i.path) not in gone]
@@ -481,16 +517,30 @@ class ThumbGrid(QListView):
         self.setSpacing(4)
         self.setMouseTracking(True)
         self.setWordWrap(False)
+        # Smooth scrolling: the default (a whole row per wheel step) jumps too far.
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._update_scroll_step()
+
+    def updateGeometries(self) -> None:
+        super().updateGeometries()  # Qt resets the step here; put ours back
+        self._update_scroll_step()
+
+    def _update_scroll_step(self) -> None:
+        # One wheel notch scrolls 3 steps; make that about a third of a row.
+        row = self.delegate.thumb_size + 38 + INFO_LINE * len(self.delegate.info_fields)
+        self.verticalScrollBar().setSingleStep(max(10, row // 9))
 
     def photo_model(self) -> PhotoModel:
         return self.model()  # type: ignore[return-value]
 
     def set_thumb_size(self, size: int) -> None:
         self.delegate.thumb_size = size
+        self._update_scroll_step()
         self.relayout()
 
     def set_info_fields(self, fields: list[str]) -> None:
         self.delegate.info_fields = [f for f in INFO_FIELDS if f in fields]
+        self._update_scroll_step()
         self.relayout()
 
     def relayout(self) -> None:

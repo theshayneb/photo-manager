@@ -12,7 +12,7 @@ Placeholders shared by rename patterns and filename templates:
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 DEFAULT_DISPLAY_FORMAT = "%m-%d-%Y %I:%M:%S %p"
 EXIF_FORMAT = "%Y:%m:%d %H:%M:%S"
@@ -84,32 +84,6 @@ def parse_loose(text: str) -> datetime:
             hour, int(g.get("m") or 0), int(g.get("s") or 0),
         )
     raise ValueError(f"not a date: {text!r}")
-
-
-_SHIFT_PART = re.compile(r"(?P<n>\d+)\s*(?P<u>y|mo|w|d|h|m|s)", re.I)
-
-
-def parse_shift(text: str) -> timedelta:
-    """Parse an offset like "+2h", "-1d 3h 15m", "+30s" ("mo"/"y" not allowed)."""
-    cleaned = text.strip().replace(" ", "")
-    if not cleaned:
-        raise ValueError("empty")
-    sign = -1 if cleaned.startswith("-") else 1
-    body = cleaned.lstrip("+-")
-    pos = 0
-    total = timedelta()
-    units = {"w": "weeks", "d": "days", "h": "hours", "m": "minutes", "s": "seconds"}
-    for match in _SHIFT_PART.finditer(body):
-        if match.start() != pos:
-            raise ValueError(f"can't read shift: {text!r}")
-        unit = match["u"].lower()
-        if unit not in units:
-            raise ValueError("use w, d, h, m or s")
-        total += timedelta(**{units[unit]: int(match["n"])})
-        pos = match.end()
-    if pos != len(body) or pos == 0:
-        raise ValueError(f"can't read shift: {text!r}")
-    return sign * total
 
 
 # --------------------------------------------------------------------------

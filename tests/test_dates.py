@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
-from photo_manager.core.dates import format_display, format_pattern, parse_loose, parse_shift
+from photo_manager.core.dates import format_display, format_pattern, parse_loose
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -25,15 +25,6 @@ def test_parse_loose(text, expected):
 def test_parse_loose_rejects(text):
     with pytest.raises(ValueError):
         parse_loose(text)
-
-
-def test_parse_shift():
-    assert parse_shift("+1h") == timedelta(hours=1)
-    assert parse_shift("-2d 3h") == -timedelta(days=2, hours=3)
-    assert parse_shift("30m") == timedelta(minutes=30)
-    for bad in ("", "+", "1x", "h1", "+1y"):
-        with pytest.raises(ValueError):
-            parse_shift(bad)
 
 
 def test_format_display_default_is_us_12_hour():

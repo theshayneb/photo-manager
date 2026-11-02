@@ -67,3 +67,18 @@ def test_jpeg_keywords_visible_to_windows(et, tmp_path):
     [data] = et.read([path], READ_TAGS)
     assert data.get("IPTC:Keywords") == "rego park"
     assert data.get("XMP:Subject") == "rego park"
+
+
+def test_crop_keeps_metadata(et, tmp_path):
+    from photo_manager.core.crop import save_crop
+
+    path = make(tmp_path, "keep me.jpg")
+    et.write(path, date_args(path, DT, set_file_dates=True))
+    et.write(path, keyword_args(path, add=["josh"]))
+    et.write(path, label_args("Green"))
+    copy = save_crop(path, (2, 2, 20, 16), et, as_copy=True)
+    meta = read(et, copy)
+    assert meta.date_taken == DT and meta.keywords == ["josh"] and meta.label == "Green"
+    assert meta.image_size == "18x14"
+    if sys.platform == "win32":
+        assert meta.file_created == DT

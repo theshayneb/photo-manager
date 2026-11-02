@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -64,7 +64,7 @@ class InfoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumHeight(200)
+        self.preview.setMinimumHeight(150)
         self.preview.setFrameShape(QFrame.Shape.StyledPanel)
         self.name = QLabel()
         self.name.setWordWrap(True)
@@ -91,7 +91,7 @@ class InfoPanel(QWidget):
         item = items[0]
         if item.thumb is not None:
             self.preview.setPixmap(item.thumb.scaled(
-                280, 210, Qt.AspectRatioMode.KeepAspectRatio,
+                300, 170, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))
         else:
             self.preview.setText("No preview")
@@ -120,7 +120,7 @@ class LabelPanel(QWidget):
         self.buttons: dict[str, QPushButton] = {}
         for n, label in enumerate(LABELS, start=1):
             btn = QPushButton()
-            btn.setFixedSize(34, 26)
+            btn.setFixedSize(30, 20)
             btn.setToolTip(f"{label}  (Ctrl+{n})")
             btn.setCheckable(True)
             color = LABEL_COLORS[label].name()
@@ -154,7 +154,7 @@ class LabelPanel(QWidget):
 
 
 # --------------------------------------------------------------------------
-# Date taken (typed, shifted, or from filename)
+# Date taken (typed, or from filename)
 # --------------------------------------------------------------------------
 
 class DatePanel(QWidget):
@@ -181,16 +181,6 @@ class DatePanel(QWidget):
         self.parsed = _hint("")
         layout.addWidget(self.parsed)
 
-        row = QHBoxLayout()
-        self.shift_edit = QLineEdit()
-        self.shift_edit.setPlaceholderText("Shift, e.g. +1h or -2d 3h")
-        self.shift_edit.returnPressed.connect(self.apply_shift)
-        self.shift_btn = QPushButton("Shift")
-        self.shift_btn.clicked.connect(self.apply_shift)
-        row.addWidget(self.shift_edit, 1)
-        row.addWidget(self.shift_btn)
-        layout.addLayout(row)
-
         self.file_dates = QCheckBox("Also set Windows Created/Modified dates")
         self.file_dates.setChecked(ctl.settings.set_file_dates)
         self.file_dates.toggled.connect(self._toggle_file_dates)
@@ -216,8 +206,7 @@ class DatePanel(QWidget):
         self.preview = QTreeWidget()
         self.preview.setHeaderLabels(["File", "New date taken"])
         self.preview.setRootIsDecorated(False)
-        self.preview.setMinimumHeight(110)
-        self.preview.setMaximumHeight(180)
+        self.preview.setFixedHeight(60)
         self.preview.setColumnWidth(0, 150)
         layout.addWidget(self.preview)
         self.filename_btn = QPushButton("Set date from filename")
@@ -269,7 +258,7 @@ class DatePanel(QWidget):
         self._update_parsed()
         self._update_filename_preview()
         writable = bool(_writable(items)) and self.ctl.exiftool_ok
-        for widget in (self.edit, self.apply_btn, self.shift_edit, self.shift_btn, self.filename_btn):
+        for widget in (self.edit, self.apply_btn, self.filename_btn):
             widget.setEnabled(writable)
 
     def _update_parsed(self) -> None:
@@ -312,6 +301,10 @@ class DatePanel(QWidget):
                     row.setForeground(1, Qt.GlobalColor.gray)
                 rows.append(row)
         self.preview.addTopLevelItems(rows)
+        # Only as tall as needed (up to 6 rows), so the sidebar stays short.
+        shown = max(1, min(6, self.preview.topLevelItemCount() + (1 if len(self.items) > PREVIEW_ROWS else 0)))
+        row_h = self.preview.sizeHintForRow(0) if self.preview.topLevelItemCount() else 18
+        self.preview.setFixedHeight(self.preview.header().sizeHint().height() + shown * max(row_h, 16) + 6)
         if len(self.items) > PREVIEW_ROWS:
             self.preview.addTopLevelItem(QTreeWidgetItem([f"…and {len(self.items) - PREVIEW_ROWS} more", ""]))
         n = len([p for p in self._filename_plan if metadata_writable(p)])
@@ -333,20 +326,6 @@ class DatePanel(QWidget):
             self.parsed.setText("<span style='color:#e5484d'>Can't read that date</span>")
             return
         self._write({i.path: dt for i in self.items}, "date taken")
-
-    def apply_shift(self) -> None:
-        try:
-            delta = dates.parse_shift(self.shift_edit.text())
-        except ValueError:
-            QMessageBox.information(self, "Shift dates", "Use something like +1h, -30m or -2d 3h.")
-            return
-        missing = [i for i in self.items if not (i.meta and i.meta.date_taken)]
-        new = {i.path: i.meta.date_taken + delta for i in self.items if i.meta and i.meta.date_taken}
-        if missing:
-            QMessageBox.information(self, "Shift dates",
-                                    f"{len(missing)} file(s) have no date taken and will be skipped.")
-        self._write(new, "date shift")
-        self.shift_edit.clear()
 
     def apply_filename(self) -> None:
         self._write(dict(self._filename_plan), "date from filename")
@@ -451,7 +430,6 @@ class RenamePanel(QWidget):
 # --------------------------------------------------------------------------
 
 class KeywordPanel(QWidget):
-    COLUMNS = 3
 
     def __init__(self, ctl: Controller):
         super().__init__()
@@ -474,7 +452,7 @@ class KeywordPanel(QWidget):
         menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(menu_btn)
         menu.addAction("New set…", self._new_set)
-        menu.addAction("Rename set…", self._rename_set)
+        menu.addAction("Edit this set…", self._edit_set)
         menu.addAction("Delete set", self._delete_set)
         menu.addSeparator()
         menu.addAction("Add the selection's keywords to this set", self._adopt_keywords)
@@ -485,9 +463,7 @@ class KeywordPanel(QWidget):
         layout.addLayout(row)
 
         self.grid_host = QWidget()
-        self.grid = QGridLayout(self.grid_host)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(3)
+        self.grid = FlowLayout(self.grid_host, spacing=3)
         layout.addWidget(self.grid_host)
 
         self.other_title = _hint("Also on the selection (click to remove):")
@@ -526,15 +502,19 @@ class KeywordPanel(QWidget):
             self.ctl.settings.current_keyword_set = name
             self._reload_sets()
 
-    def _rename_set(self) -> None:
+    def _edit_set(self) -> None:
+        from .dialogs import KeywordSetDialog
+
         old = self.ctl.settings.current_keyword_set
-        name, ok = QInputDialog.getText(self, "Rename keyword set", "Name:", text=old)
-        name = name.strip()
-        if ok and name and name != old and name not in self.ctl.settings.keyword_sets:
-            sets = self.ctl.settings.keyword_sets
-            self.ctl.settings.keyword_sets = {(name if k == old else k): v for k, v in sets.items()}
-            self.ctl.settings.current_keyword_set = name
-            self._reload_sets()
+        sets = self.ctl.settings.keyword_sets
+        dlg = KeywordSetDialog(old, list(sets.get(old, [])), [k for k in sets if k != old], self)
+        if not dlg.exec():
+            return
+        name, keywords = dlg.result_value()
+        self.ctl.settings.keyword_sets = {(name if k == old else k): (keywords if k == old else v)
+                                          for k, v in sets.items()}
+        self.ctl.settings.current_keyword_set = name
+        self._reload_sets()
 
     def _delete_set(self) -> None:
         sets = self.ctl.settings.keyword_sets
@@ -573,19 +553,15 @@ class KeywordPanel(QWidget):
     # -- buttons --
 
     def _build_buttons(self) -> None:
-        while self.grid.count():
-            widget = self.grid.takeAt(0).widget()
-            if widget:
-                widget.deleteLater()
+        self.grid.clear()
         self.buttons = {}
-        for n, kw in enumerate(self.keyword_set):
+        for kw in self.keyword_set:
             btn = QPushButton(kw)
             btn.setProperty("keyword", True)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _=False, k=kw: self.toggle(k))
             btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             btn.customContextMenuRequested.connect(lambda _pos, k=kw, b=btn: self._button_menu(k, b))
-            self.grid.addWidget(btn, n // self.COLUMNS, n % self.COLUMNS)
+            self.grid.addWidget(btn)
             self.buttons[kw.casefold()] = btn
         self.refresh(self.items)
 
@@ -683,6 +659,9 @@ class Section(QWidget):
         self.header.setProperty("section", True)
         self.header.toggled.connect(self._toggled)
         layout.addWidget(self.header)
+        if body.layout() is not None:
+            body.layout().setContentsMargins(4, 2, 4, 2)
+            body.layout().setSpacing(4)
         layout.addWidget(body)
         self._toggled(not collapsed)
 

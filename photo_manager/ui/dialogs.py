@@ -205,3 +205,89 @@ class MoveDialog(QDialog):
     def _choose(self, folder: str) -> None:
         self.folder = os.path.normpath(folder)
         self.accept()
+
+
+class KeywordSetDialog(QDialog):
+    """Edit a keyword set: its name, and its keywords (rename, reorder, add, remove)."""
+
+    def __init__(self, name: str, keywords: list[str], other_names: list[str], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit keyword set")
+        self.resize(380, 480)
+        self.other_names = {n.casefold() for n in other_names}
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Set name:"))
+        self.name = QLineEdit(name)
+        row.addWidget(self.name, 1)
+        layout.addLayout(row)
+        layout.addWidget(QLabel("Keywords (double-click to rename, drag to reorder):"))
+        self.list = QListWidget()
+        self.list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        for kw in keywords:
+            self._add_item(kw)
+        layout.addWidget(self.list, 1)
+
+        row = QHBoxLayout()
+        self.new_kw = QLineEdit()
+        self.new_kw.setPlaceholderText("New keyword (Enter to add)")
+        self.new_kw.returnPressed.connect(self._add_typed)
+        row.addWidget(self.new_kw, 1)
+        for text, slot in (("Remove", self._remove), ("Sort A–Z", self._sort)):
+            btn = QPushButton(text)
+            btn.clicked.connect(slot)
+            row.addWidget(btn)
+        layout.addLayout(row)
+        note = QLabel("Changes here only affect the buttons. Keywords already on photos stay as they are.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.error = QLabel()
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _add_item(self, keyword: str) -> None:
+        item = QListWidgetItem(keyword)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self.list.addItem(item)
+
+    def _add_typed(self) -> None:
+        for word in self.new_kw.text().split(","):
+            word = word.strip()
+            if word and word.casefold() not in {k.casefold() for k in self.keywords()}:
+                self._add_item(word)
+        self.new_kw.clear()
+
+    def _remove(self) -> None:
+        for item in self.list.selectedItems():
+            self.list.takeItem(self.list.row(item))
+
+    def _sort(self) -> None:
+        words = sorted(self.keywords(), key=str.casefold)
+        self.list.clear()
+        for word in words:
+            self._add_item(word)
+
+    def keywords(self) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for i in range(self.list.count()):
+            word = self.list.item(i).text().strip()
+            if word and word.casefold() not in seen:
+                seen.add(word.casefold())
+                out.append(word)
+        return out
+
+    def result_value(self) -> tuple[str, list[str]]:
+        return self.name.text().strip(), self.keywords()
+
+    def _accept(self) -> None:
+        name = self.name.text().strip()
+        if not name:
+            self.error.setText("<span style='color:#e5484d'>The set needs a name.</span>")
+        elif name.casefold() in self.other_names:
+            self.error.setText("<span style='color:#e5484d'>Another set already has that name.</span>")
+        else:
+            self.accept()

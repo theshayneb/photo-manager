@@ -27,6 +27,7 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Do this | How |
 |---|---|
 | Open a folder | Click it in the **Folders** tree, or type/paste a path in the address bar |
+| Quick preview (inside the window) | **Shift+P**. ← → to move, **C** to crop, **Shift+P** or **Esc** to close. The sidebar follows the photo you're looking at |
 | View big | Double-click or **Enter**. In the viewer: ← → to move, **Delete** to recycle, **Enter** to play a video, **Esc** to close |
 | Select | Click, Ctrl+click, Shift+click, **Ctrl+A** |
 | Delete | **Delete** key (goes to the Recycle Bin) |
@@ -41,7 +42,8 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 
 - **Sidebar panels**: hide panels you don't use. Click a panel's title in the sidebar to collapse it.
 - **Show under thumbnails**: Date taken (on by default), dimensions, file size, keywords.
-- **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday.
+- **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday,
+  and show their week number (Sunday weeks: week 1 contains Jan 1; Monday weeks: ISO week numbers).
   Click a group's header to select everything in it (Ctrl+click adds to the selection).
 - **Theme**: Dark (default), Light, or follow Windows.
 
@@ -50,15 +52,25 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 - Click a button to add that keyword to all selected photos. Click it again to remove it.
   - **Filled** button: every selected photo has it. **Dashed**: some do.
 - Type in **"Click here to add keywords"** and press Enter to add new ones (comma-separated). They also become buttons.
-- Switch between keyword **sets** with the dropdown; **⋯** creates, renames or deletes sets.
+- Switch between keyword **sets** with the dropdown; **⋯** creates, edits or deletes sets.
+  **Edit this set…** renames the set and lets you rename, reorder (drag), add and remove its keywords.
 - Right-click a button to remove it from the set (photos keep their keywords).
 - Keywords on the selection that aren't in the current set show below as chips; click one to remove it from the files.
 
 ### Date taken
 
 - Type a date the way you'd write it and press **Enter**: `6/14/24 6:32p`, `06-14-2024 06-32-05 PM`, `2024-06-14 18:32` all work. The line under the box shows how it was read.
-- **Shift** moves dates by an amount: `+1h`, `-30m`, `-2d 3h` (useful for a camera on the wrong time zone).
 - **Also set Windows Created/Modified dates** makes Explorer's dates match.
+
+### Crop
+
+In the preview (**Shift+P**) press **C** (or click **Crop**). Drag to draw a box, drag its edges or corners to adjust,
+or drag inside it to move it. Pick an **aspect ratio** (Free, Original, 1:1, 4:3, 3:2, 16:9 and portrait versions).
+**Enter** saves, **Esc** cancels.
+
+- By default the cropped photo **replaces the original, and the original goes to the Recycle Bin**, so you can
+  always get it back. Tick **Save as a copy** to keep the original and save `name_crop.jpg` next to it.
+- Dates, keywords, labels and the rest of the metadata are kept. Rotated phone photos are saved upright.
 
 ### Date from filename
 

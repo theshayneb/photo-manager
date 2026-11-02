@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 from PIL import Image
-from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtCore import QItemSelectionModel, QRectF, Qt
 from PySide6.QtWidgets import QApplication
 
 from photo_manager.core.exiftool import ExifTool
@@ -187,11 +187,11 @@ def test_group_by_week_respects_week_start(window):
         "vacation.jpg": datetime(2026, 10, 26, 12),
     })
     win.set_group("week")
-    assert headers(win) == ["Week of Sun, Oct 18, 2026  –  Sat, Oct 24",
-                            "Week of Sun, Oct 25, 2026  –  Sat, Oct 31"]
+    assert headers(win) == ["Week 43  ·  Sun, Oct 18  –  Sat, Oct 24, 2026",
+                            "Week 44  ·  Sun, Oct 25  –  Sat, Oct 31, 2026"]
     win.set_week_start("monday")
-    assert headers(win) == ["Week of Mon, Oct 19, 2026  –  Sun, Oct 25",
-                            "Week of Mon, Oct 26, 2026  –  Sun, Nov 1"]
+    assert headers(win) == ["Week 43  ·  Mon, Oct 19  –  Sun, Oct 25, 2026",
+                            "Week 44  ·  Mon, Oct 26  –  Sun, Nov 1, 2026"]
     assert win.settings.group_by == "week" and win.settings.week_start == "monday"
 
 
@@ -259,3 +259,123 @@ def test_dark_theme_applies(window):
     assert QApplication.instance().palette().window().color().name() == "#26282c"
     win.set_theme("light")
     assert win.settings.theme == "light"
+
+
+def test_week_numbers_at_year_boundaries():
+    from datetime import date
+
+    from photo_manager.ui.grid import week_number
+
+    # US: week 1 is the week containing Jan 1 (2027-01-01 is a Friday).
+    assert week_number(date(2026, 12, 27), "sunday") == (2027, 1)
+    assert week_number(date(2026, 12, 20), "sunday") == (2026, 52)
+    assert week_number(date(2026, 1, 4), "sunday") == (2026, 2)
+    # ISO: 2026-12-28 (Monday) is week 53 of 2026; 2027-01-04 is week 1.
+    assert week_number(date(2026, 12, 28), "monday") == (2026, 53)
+    assert week_number(date(2027, 1, 4), "monday") == (2027, 1)
+
+
+def test_scrolling_is_smooth_not_a_row_at_a_time(window):
+    win, _, _ = window
+    from PySide6.QtWidgets import QAbstractItemView
+
+    assert win.grid.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
+    win.grid.doItemsLayout()
+    step = win.grid.verticalScrollBar().singleStep()
+    row = win.settings.thumb_size + 38 + 16
+    assert 10 <= step * 3 <= row // 2
+
+
+def test_folder_tree_does_not_follow_open_folder(window, tmp_path):
+    win, folder, _ = window
+    other = tmp_path / "other"
+    other.mkdir()
+    before = win.tree.currentIndex()
+    win.open_folder(str(other))
+    assert win.tree.currentIndex() == before
+
+
+def test_keyword_set_dialog_edits(qapp):
+    from photo_manager.ui.dialogs import KeywordSetDialog
+
+    dlg = KeywordSetDialog("Shayne", ["me", "josh", "queens"], ["Trips"])
+    dlg.list.item(1).setText("Josh B")
+    dlg.new_kw.setText("coney island, me")
+    dlg._add_typed()
+    dlg.list.setCurrentRow(0)
+    dlg.list.item(0).setSelected(True)
+    dlg._remove()
+    dlg.name.setText("People")
+    assert dlg.result_value() == ("People", ["Josh B", "queens", "coney island"])
+    dlg.name.setText("trips")
+    dlg._accept()
+    assert "already" in dlg.error.text()
+
+
+def test_edit_set_updates_buttons(window, monkeypatch):
+    win, _, _ = window
+    from photo_manager.ui import dialogs
+
+    class FakeDialog:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return True
+
+        def result_value(self):
+            return "People", ["me", "josh"]
+
+    monkeypatch.setattr(dialogs, "KeywordSetDialog", FakeDialog)
+    win.sidebar.keywords._edit_set()
+    assert win.settings.keyword_sets == {"People": ["me", "josh"]}
+    assert win.settings.current_keyword_set == "People"
+    assert sorted(win.sidebar.keywords.buttons) == ["josh", "me"]
+
+
+def test_shift_p_preview_and_crop(window, monkeypatch):
+    win, folder, et = window
+    path = str(folder / "vacation.jpg")
+    win.grid.select_paths([path], current=path)
+    win.grid.setFocus()
+    win.open_preview()
+    assert win.previewing and win.preview.canvas.pixmap is not None
+    # Arrow keys move through photos and the sidebar follows.
+    win._preview_step(-1)
+    assert win.grid.current_path() != path
+    win._preview_step(1)
+    assert win.grid.current_path() == path
+
+    trashed = []
+    monkeypatch.setattr("send2trash.send2trash", lambda p: trashed.append(p) or os.remove(p))
+    win.preview.start_crop()
+    assert win.preview.cropping
+    win.preview.canvas.box = QRectF(10, 8, 30, 20)
+    win.preview.as_copy.setChecked(False)
+    win.preview.apply_crop()
+    settle(win)
+    from PIL import Image
+
+    with Image.open(path) as im:
+        assert im.size == (30, 20)
+    assert trashed == [path]
+
+    win.close_preview()
+    assert not win.previewing
+
+
+def test_aspect_ratio_crop_box(qapp):
+    from PySide6.QtCore import QPointF
+
+    from photo_manager.ui.preview import CropCanvas
+
+    canvas = CropCanvas()
+    canvas.resize(400, 300)
+    canvas.full_size = (4000, 3000)
+    canvas.ratio = 1.0
+    box = canvas._constrain(QPointF(100, 100), QPointF(1100, 500))
+    assert round(box.width()) == round(box.height()) == 1000
+    # Never leaves the image.
+    box = canvas._constrain(QPointF(3500, 2500), QPointF(4900, 3900))
+    assert box.right() <= 4000 and box.bottom() <= 3000
+    assert round(box.width()) == round(box.height())
