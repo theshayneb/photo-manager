@@ -148,8 +148,9 @@ class LabelPanel(QWidget):
 
         row = QHBoxLayout()
         self.flag_buttons: dict[str, QPushButton] = {}
-        for flag, text in (("Star", "★ Star"), ("Bookmark", "🔖 Bookmark")):
+        for flag, text in (("Star", "★"), ("Bookmark", "🔖")):
             btn = QPushButton(text)
+            btn.setFixedSize(30, 22)  # icon only, like the color squares; the name is in the tooltip
             btn.setCheckable(True)
             btn.setProperty("flag", True)
             btn.clicked.connect(lambda _=False, f=flag: self.toggle_flag(f))

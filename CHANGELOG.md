@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Star and Bookmark buttons in the Labels panel show just their icons (★ 🔖); hover for the name and hotkey.
+
 ## 0.7.0
 
 - Drag photos from the grid onto a folder in the Folders tree or Favorites to move them (Ctrl to copy).
