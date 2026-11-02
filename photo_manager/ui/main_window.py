@@ -18,12 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import dates, fileops
+from ..core.convert import convert_file, needs_conversion
 from ..core.crop import can_crop, save_crop
+from ..core.templates import follows_pattern, rename_pattern_regex
 from ..core.winshell import open_with, show_properties
 from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
-from .dialogs import MoveDialog, RenameDialog, TemplateDialog
+from .dialogs import ConvertDialog, MoveDialog, RenameDialog, TemplateDialog
 from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
 from .panels import PANELS, Sidebar
 from .theme import THEMES, apply_theme
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         self.grid.delegate.display_format = settings.display_format
         self.grid.set_thumb_size(settings.thumb_size)
         self.grid.set_info_fields(settings.thumb_info)
+        self.grid.delegate.show_type_badges = settings.type_badges
         self.grid.selectionModel().selectionChanged.connect(lambda *_: self._schedule_refresh())
         self.grid.activated.connect(lambda _idx: self.open_viewer())
         self.grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -92,6 +95,7 @@ class MainWindow(QMainWindow):
         self._build_shortcuts()
         self.status = QLabel()
         self.statusBar().addWidget(self.status, 1)
+        self.rename_pattern_changed()
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -238,6 +242,7 @@ class MainWindow(QMainWindow):
         for text, shortcut, tip, slot in (
             ("View", "", "Open the viewer (Enter / double-click)", self.open_viewer),
             ("Move to…", "Ctrl+M", "Move selected files to another folder (Ctrl+M)", self.move_selected),
+            ("Convert…", "", "Convert selected images to JPG or PNG", self.convert_selected),
             ("Delete", "", "Send selected files to the Recycle Bin (Delete)", self.delete_selected),
             ("Show in Explorer", "Ctrl+E", "Show in Windows Explorer (Ctrl+E)", self.show_in_explorer),
             ("Open", "Ctrl+O", "Open in the default Windows app (Ctrl+O)", self.open_external_selected),
@@ -266,6 +271,18 @@ class MainWindow(QMainWindow):
         sidebar_toggle.setShortcut(QKeySequence("F9"))
         panels.addAction(sidebar_toggle)
 
+        badges = view.addAction("File type badges")
+        badges.setCheckable(True)
+        badges.setChecked(self.settings.type_badges)
+        badges.toggled.connect(self._toggle_badges)
+        misnamed = view.addAction("Highlight names not in rename format")
+        misnamed.setCheckable(True)
+        misnamed.setChecked(self.settings.highlight_misnamed)
+        misnamed.toggled.connect(self._toggle_misnamed)
+        select_misnamed = view.addAction("Select files that need renaming")
+        select_misnamed.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        select_misnamed.triggered.connect(self.select_misnamed)
+        view.addSeparator()
         info = view.addMenu("Show under thumbnails")
         for key, title in INFO_FIELDS.items():
             action = info.addAction(title)
@@ -440,7 +457,92 @@ class MainWindow(QMainWindow):
 
     def _show_count(self) -> None:
         n = len(self.model.items)
-        self.status.setText(f"{n} photo{'s' if n != 1 else ''} and video{'s' if n != 1 else ''}")
+        text = f"{n} photo{'s' if n != 1 else ''} and video{'s' if n != 1 else ''}"
+        misnamed = len(self.misnamed_paths())
+        if misnamed:
+            text += f"   ·   ⚠ {misnamed} not in rename format (Ctrl+Shift+R selects them)"
+        self.status.setText(text)
+
+    # --------------------------------------------------------- name format
+
+    def rename_pattern_changed(self) -> None:
+        regex = rename_pattern_regex(self.settings.rename_pattern) if self.settings.highlight_misnamed else None
+        self.grid.delegate.name_regex = regex
+        self.grid.viewport().update()
+        if hasattr(self, "status"):
+            self._show_count()
+
+    def misnamed_paths(self) -> list[str]:
+        regex = self.grid.delegate.name_regex
+        if regex is None:
+            return []
+        return [i.path for i in self.model.visible_items() if not follows_pattern(i.name, regex)]
+
+    def select_misnamed(self) -> None:
+        if self.grid.delegate.name_regex is None:
+            self._toggle_misnamed(True)
+        paths = self.misnamed_paths()
+        self.grid.select_paths(paths)
+        if paths:
+            self.grid.scrollTo(self.model.index(self.model.row_of(paths[0])))
+        self.refresh_sidebar()
+
+    def _toggle_misnamed(self, on: bool) -> None:
+        self.settings.highlight_misnamed = on
+        self.rename_pattern_changed()
+
+    def _toggle_badges(self, on: bool) -> None:
+        self.settings.type_badges = on
+        self.grid.delegate.show_type_badges = on
+        self.grid.viewport().update()
+
+    # ------------------------------------------------------------- convert
+
+    def convert_selected(self) -> None:
+        paths = self.grid.selected_paths()
+        if not any(needs_conversion(p, t) for p in paths for t in ("JPG", "PNG")):
+            QMessageBox.information(self, "Convert", "Select some images to convert first.")
+            return
+        dlg = ConvertDialog(paths, self.settings, self)
+        if not dlg.exec():
+            return
+        todo = dlg.to_convert()
+        target, quality = self.settings.convert_target, self.settings.convert_quality
+        recycle = self.settings.convert_recycle
+        et = self.et
+        self.status.setText(f"Converting {len(todo)} file(s) to {target}…")
+
+        def work() -> tuple[dict[str, str], list[tuple[str, str]]]:
+            done, failures = {}, []
+            for path in todo:
+                try:
+                    done[path] = convert_file(path, target, quality, et, recycle)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append((path, str(exc)))
+            return done, failures
+
+        def finished(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
+            if error:
+                QMessageBox.warning(self, "Convert", error)
+                return
+            done, failures = result
+            for new in done.values():
+                self.model.add_path(new)
+            if recycle:
+                self.model.remove_paths(list(done))
+            self.regroup(select=list(done.values()))
+            self._load_meta(list(done.values()))
+            self._show_count()
+            self.refresh_sidebar()
+            msg = f"Converted {len(done)} file(s) to {target}."
+            if recycle and done:
+                msg += " Originals are in the Recycle Bin."
+            self.status.setText(msg)
+            if failures:
+                QMessageBox.warning(self, "Convert", "Some files weren't converted:\n" +
+                                    "\n".join(f"• {os.path.basename(p)}: {e}" for p, e in failures[:10]))
+
+        self.bg.run(work, finished)
 
     def _sort_changed(self) -> None:
         self.settings.sort_by = self.sort_combo.currentData()
@@ -637,7 +739,8 @@ class MainWindow(QMainWindow):
             renamed, failures = result
             self.model.rename_paths(renamed)
             self.regroup(select=list(renamed.values()) + [p for p, _ in failures])
-            self.status.setText(f"Renamed {len(renamed)} file(s).")
+            self._show_count()
+            self.status.setText(self.status.text() + f"   ·   Renamed {len(renamed)} file(s).")
             if failures:
                 QMessageBox.warning(self, "Rename", "\n".join(f"{p}: {e}" for p, e in failures[:10]))
             self.refresh_sidebar()
@@ -747,6 +850,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         add("Rename…", self.rename_current, "F2", single)
         add("Crop…", self.crop_current, "", single and item.kind == "image" and can_crop(item.path))
+        add("Convert to JPG…", self.convert_selected, "",
+            any(needs_conversion(p, "JPG") for p in paths))
         labels = menu.addMenu("Color label")
         for n, label in enumerate(LABELS, start=1):
             action = labels.addAction(label, lambda name=label: self._label_shortcut(name))

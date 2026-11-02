@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-VALUE_OPTIONS = {"-charset", "-api", "-echo4", "-stay_open", "-@", "-common_args"}
+VALUE_OPTIONS = {"-charset", "-api", "-echo4", "-stay_open", "-@", "-common_args", "-TagsFromFile"}
 TAG_MAP = {
     "XMP-dc:Subject": "XMP:Subject",
     "XMP-xmp:Label": "XMP:Label",

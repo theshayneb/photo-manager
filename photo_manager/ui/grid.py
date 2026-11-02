@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemD
 from ..core import dates, thumbs
 from ..core.media import kind
 from ..core.metadata import LABELS, Meta
+from ..core.templates import follows_pattern
 
 THUMB_PIXELS = 320  # generated once, scaled down for display
 INFO_LINE = 16
@@ -392,6 +393,24 @@ class PhotoModel(QAbstractListModel):
         self.regroup()
 
 
+TYPE_COLORS = {
+    "JPG": "#3b82f6", "JPEG": "#3b82f6", "JPE": "#3b82f6",
+    "PNG": "#16a34a",
+    "HEIC": "#ea580c", "HEIF": "#ea580c",
+    "WEBP": "#8b5cf6",
+    "AVIF": "#db2777",
+    "GIF": "#0d9488",
+    "TIF": "#64748b", "TIFF": "#64748b", "BMP": "#64748b",
+}
+VIDEO_TYPE_COLOR = "#dc2626"
+MISNAMED_COLOR = QColor("#f59e0b")
+
+
+def type_label(path: str) -> str:
+    ext = os.path.splitext(path)[1].lstrip(".").upper()
+    return {"JPEG": "JPG", "JPE": "JPG", "TIFF": "TIF", "HEIF": "HEIC"}.get(ext, ext)
+
+
 class ThumbDelegate(QStyledItemDelegate):
     def __init__(self, view: "ThumbGrid"):
         super().__init__(view)
@@ -399,6 +418,11 @@ class ThumbDelegate(QStyledItemDelegate):
         self.thumb_size = 160
         self.info_fields: list[str] = ["date"]
         self.display_format = dates.DEFAULT_DISPLAY_FORMAT
+        self.show_type_badges = True
+        self.name_regex = None  # files whose names don't match get highlighted
+
+    def is_misnamed(self, item: Item) -> bool:
+        return self.name_regex is not None and not follows_pattern(item.name, self.name_regex)
 
     def sizeHint(self, option, index) -> QSize:  # type: ignore[override]
         row = index.data(ItemRole)
@@ -480,11 +504,29 @@ class ThumbDelegate(QStyledItemDelegate):
             painter.setPen(QColor("white"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "▶")
 
+        if self.show_type_badges:
+            label = type_label(item.path)
+            if label:
+                small = QFont(option.font)
+                small.setBold(True)
+                small.setPointSizeF(max(6.5, option.font.pointSizeF() - 2))
+                painter.setFont(small)
+                width = painter.fontMetrics().horizontalAdvance(label) + 10
+                badge = QRect(target.right() - width - 3, target.top() + 4, width, 16)
+                color = QColor(VIDEO_TYPE_COLOR if item.kind == "video" else TYPE_COLORS.get(label, "#475569"))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawRoundedRect(badge, 3, 3)
+                painter.setPen(QColor("white"))
+                painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+
         text_color = palette.highlightedText().color() if selected else palette.text().color()
         text_rect = QRect(rect.x() + 4, box.bottom() + 6, rect.width() - 8, 20)
-        painter.setPen(text_color)
+        misnamed = self.is_misnamed(item)
+        painter.setPen(MISNAMED_COLOR if misnamed and not selected else text_color)
         painter.setFont(QFont(option.font))
-        name = option.fontMetrics.elidedText(item.name, Qt.TextElideMode.ElideMiddle, text_rect.width())
+        shown = ("⚠ " + item.name) if misnamed else item.name
+        name = option.fontMetrics.elidedText(shown, Qt.TextElideMode.ElideMiddle, text_rect.width())
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, name)
 
         lines = self._info_lines(item)

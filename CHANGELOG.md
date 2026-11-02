@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Rename panel shows a File → New name list (with the exact final names, including `_1` for duplicates).
+- Files not named in the current rename format are highlighted in amber with ⚠; the status bar counts them and
+  View → Select files that need renaming (Ctrl+Shift+R) selects them.
+- File type badges on thumbnails (JPG, PNG, HEIC, WEBP, AVIF, GIF, videos…).
+- Convert images to JPG (or PNG), keeping metadata; originals kept or sent to the Recycle Bin.
+- App icon.
+
 ## 0.5.0
 
 - Keyword buttons are equal-size boxes in a 3-column grid again (slightly shorter than before).

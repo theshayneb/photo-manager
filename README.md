@@ -41,6 +41,12 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 
 ### View menu
 
+- **File type badges**: a colored label on each thumbnail (JPG blue, PNG green, HEIC orange, WEBP purple,
+  AVIF pink, GIF teal, videos red).
+- **Highlight names not in rename format**: files whose names don't match the current Rename pattern show in
+  amber with ⚠, and the status bar counts them. **Select files that need renaming** (**Ctrl+Shift+R**) selects
+  them all, ready for the Rename panel.
+
 - **Sidebar panels**: hide panels you don't use. Click a panel's title in the sidebar to collapse it.
 - **Show under thumbnails**: Date taken (on by default), dimensions, file size, keywords.
 - **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday,
@@ -95,7 +101,16 @@ Built-in templates:
 `{hh}` (01–12) with `{AMPM}`, `{mm}` `{ss}` `{fff}` (milliseconds, ignored), and `*` any text, `?` one character, `#` one digit.
 `{MM}` is month and `{mm}` is minute.
 
+### Convert (HEIC / WEBP / AVIF → JPG)
+
+Select images and use **Convert…** in the toolbar or right-click → **Convert to JPG…**. Choose JPG (with quality)
+or PNG, and whether to keep the originals or send them to the Recycle Bin. Each new file goes next to its original
+with the same name (e.g. `phone.heic` → `phone.jpg`; `_1` is added if that name is taken). Dates, keywords, labels
+and the rest of the metadata are copied; transparent areas become white in JPGs.
+
 ### Rename
+
+The Rename panel lists every selected file with its new name before you click **Rename**.
 
 Choose which date to use: **Date taken** (EXIF DateTimeOriginal), **EXIF Create Date**, or the Windows
 Created/Modified date. The pattern uses the same placeholders plus `{name}` (the current name), e.g.

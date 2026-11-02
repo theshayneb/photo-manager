@@ -333,3 +333,84 @@ class RenameDialog(QDialog):
                                f"({os.path.splitext(self.path)[1]}) so the file still opens.</span>")
             return
         self.accept()
+
+
+class ConvertDialog(QDialog):
+    """Convert images to JPG (or PNG): quality, and what to do with the originals."""
+
+    def __init__(self, paths: list[str], settings, parent: QWidget | None = None):  # type: ignore[no-untyped-def]
+        from PySide6.QtWidgets import QComboBox, QRadioButton, QSlider
+
+        from ..core.convert import needs_conversion
+
+        super().__init__(parent)
+        self.paths = paths
+        self.settings = settings
+        self._needs = needs_conversion
+        self.setWindowTitle("Convert")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Convert to:"))
+        self.target = QComboBox()
+        self.target.addItems(["JPG", "PNG"])
+        self.target.setCurrentText(getattr(settings, "convert_target", "JPG"))
+        self.target.currentTextChanged.connect(lambda _t: self._update())
+        row.addWidget(self.target)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        row = QHBoxLayout()
+        self.quality_label = QLabel()
+        self.quality = QSlider(Qt.Orientation.Horizontal)
+        self.quality.setRange(60, 100)
+        self.quality.setValue(int(getattr(settings, "convert_quality", 92)))
+        self.quality.valueChanged.connect(lambda _v: self._update())
+        row.addWidget(self.quality_label)
+        row.addWidget(self.quality, 1)
+        layout.addLayout(row)
+
+        layout.addWidget(QLabel("Originals:"))
+        self.keep = QRadioButton("Keep them")
+        self.recycle = QRadioButton("Send them to the Recycle Bin")
+        (self.recycle if getattr(settings, "convert_recycle", False) else self.keep).setChecked(True)
+        layout.addWidget(self.keep)
+        layout.addWidget(self.recycle)
+
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        note = QLabel("Dates, keywords, labels and other metadata are copied to the new files. "
+                      "Each new file goes next to its original with the same name.")
+        note.setWordWrap(True)
+        note.setProperty("hint", True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._update()
+
+    def to_convert(self) -> list[str]:
+        return [p for p in self.paths if self._needs(p, self.target.currentText())]
+
+    def _update(self) -> None:
+        jpg = self.target.currentText() == "JPG"
+        self.quality.setEnabled(jpg)
+        self.quality_label.setText(f"JPG quality: {self.quality.value()}" if jpg else "PNG is lossless")
+        todo = self.to_convert()
+        skipped = len(self.paths) - len(todo)
+        text = f"{len(todo)} file{'s' if len(todo) != 1 else ''} will be converted to {self.target.currentText()}."
+        if skipped:
+            text += f" {skipped} skipped (already {self.target.currentText()}, or a video)."
+        self.summary.setText(text)
+        self.ok.setText(f"Convert {len(todo)}")
+        self.ok.setEnabled(bool(todo))
+
+    def _accept(self) -> None:
+        self.settings.convert_target = self.target.currentText()
+        self.settings.convert_quality = self.quality.value()
+        self.settings.convert_recycle = self.recycle.isChecked()
+        self.accept()

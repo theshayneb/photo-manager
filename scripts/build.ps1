@@ -6,5 +6,7 @@ if (-not (Test-Path "vendor\exiftool\exiftool.exe")) { & "$PSScriptRoot\get-exif
 python -m PyInstaller --noconfirm --clean --windowed --name PhotoManager `
     --collect-all pillow_heif `
     --add-data "vendor\exiftool;exiftool" `
+    --add-data "photo_manager\assets;photo_manager\assets" `
+    --icon "photo_manager\assets\icon.ico" `
     photo_manager\__main__.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }

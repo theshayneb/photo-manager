@@ -33,6 +33,7 @@ class Controller(Protocol):
 
     def write_metadata(self, jobs: list[tuple[str, list[str]]], what: str) -> None: ...
     def rename_files(self, plan: dict[str, str]) -> None: ...
+    def rename_pattern_changed(self) -> None: ...
     def edit_templates(self) -> None: ...
 
 
@@ -46,6 +47,13 @@ def _hint(text: str) -> QLabel:
 def _repolish(widget: QWidget) -> None:
     widget.style().unpolish(widget)
     widget.style().polish(widget)
+
+
+def _fit_tree(tree: QTreeWidget, max_rows: int = 6) -> None:
+    """Make a preview list only as tall as its rows (up to max_rows)."""
+    shown = max(1, min(max_rows, tree.topLevelItemCount()))
+    row_h = tree.sizeHintForRow(0) if tree.topLevelItemCount() else 18
+    tree.setFixedHeight(tree.header().sizeHint().height() + shown * max(row_h, 16) + 6)
 
 
 def _writable(items: list[Item]) -> list[Item]:
@@ -301,12 +309,9 @@ class DatePanel(QWidget):
                     row.setForeground(1, Qt.GlobalColor.gray)
                 rows.append(row)
         self.preview.addTopLevelItems(rows)
-        # Only as tall as needed (up to 6 rows), so the sidebar stays short.
-        shown = max(1, min(6, self.preview.topLevelItemCount() + (1 if len(self.items) > PREVIEW_ROWS else 0)))
-        row_h = self.preview.sizeHintForRow(0) if self.preview.topLevelItemCount() else 18
-        self.preview.setFixedHeight(self.preview.header().sizeHint().height() + shown * max(row_h, 16) + 6)
         if len(self.items) > PREVIEW_ROWS:
             self.preview.addTopLevelItem(QTreeWidgetItem([f"…and {len(self.items) - PREVIEW_ROWS} more", ""]))
+        _fit_tree(self.preview)
         n = len([p for p in self._filename_plan if metadata_writable(p)])
         self.filename_btn.setText(f"Set date from filename ({n} file{'s' if n != 1 else ''})")
         self.filename_btn.setEnabled(n > 0 and self.ctl.exiftool_ok)
@@ -380,6 +385,12 @@ class RenamePanel(QWidget):
         layout.addWidget(self.pattern)
         layout.addWidget(_hint("{YYYY} {YY} {MM} {DD} {HH} {mm} {ss} · {hh} {AMPM} for 12-hour · "
                                "{name} = current name"))
+        self.preview = QTreeWidget()
+        self.preview.setHeaderLabels(["File", "New name"])
+        self.preview.setRootIsDecorated(False)
+        self.preview.setColumnWidth(0, 150)
+        self.preview.setFixedHeight(60)
+        layout.addWidget(self.preview)
         self.example = _hint("")
         layout.addWidget(self.example)
         self.button = QPushButton("Rename")
@@ -393,6 +404,7 @@ class RenamePanel(QWidget):
     def _changed(self, text: str) -> None:
         self.ctl.settings.rename_pattern = text
         self.refresh(self.items)
+        self.ctl.rename_pattern_changed()
 
     def _names(self) -> dict[str, str]:
         pattern = self.pattern.currentText().strip()
@@ -406,26 +418,48 @@ class RenamePanel(QWidget):
                 names[item.path] = dates.format_pattern(pattern, dt, os.path.splitext(item.name)[0])
         return names
 
+    def plan(self) -> dict[str, str]:
+        from ..core.fileops import plan_renames
+
+        return plan_renames(self._names())
+
+    def preview_rows(self) -> list[tuple[str, str]]:
+        return [(self.preview.topLevelItem(i).text(0), self.preview.topLevelItem(i).text(1))
+                for i in range(self.preview.topLevelItemCount())]
+
     def refresh(self, items: list[Item]) -> None:
         self.items = items
         names = self._names()
-        if names:
-            first = next(iter(names))
-            example = names[first] + os.path.splitext(first)[1]
-            skipped = len(items) - len(names)
-            text = f"{os.path.basename(first)}\n→ {example}"
-            if skipped:
-                text += f"\n{skipped} without that date will be skipped"
-            self.example.setText(text)
-        else:
-            self.example.setText("Selected files don't have that date." if items else "")
-        self.button.setText(f"Rename {len(names)} file{'s' if len(names) != 1 else ''}")
-        self.button.setEnabled(bool(names))
+        plan = self.plan()
+        self.preview.clear()
+        rows = []
+        for item in items[:PREVIEW_ROWS]:
+            if item.path in plan:
+                new, tip, gray = os.path.basename(plan[item.path]), "", False
+            elif item.path in names:
+                new, tip, gray = "already named", "Already has this name", True
+            else:
+                new, tip, gray = "no date — skipped", "This file doesn't have the chosen date", True
+            row = QTreeWidgetItem([item.name, new])
+            row.setToolTip(0, item.name)
+            row.setToolTip(1, tip or new)
+            if gray:
+                row.setForeground(1, Qt.GlobalColor.gray)
+            rows.append(row)
+        self.preview.addTopLevelItems(rows)
+        if len(items) > PREVIEW_ROWS:
+            self.preview.addTopLevelItem(QTreeWidgetItem([f"…and {len(items) - PREVIEW_ROWS} more", ""]))
+        _fit_tree(self.preview)
+        skipped = len(items) - len(names)
+        self.example.setText(f"{skipped} without that date will be skipped" if skipped and names else
+                             ("Selected files don't have that date." if items and not names else ""))
+        self.example.setVisible(bool(self.example.text()))
+        self.preview.setVisible(bool(items))
+        self.button.setText(f"Rename {len(plan)} file{'s' if len(plan) != 1 else ''}")
+        self.button.setEnabled(bool(plan))
 
     def apply(self) -> None:
-        from ..core.fileops import plan_renames
-
-        plan = plan_renames(self._names())
+        plan = self.plan()
         pattern = self.pattern.currentText().strip()
         if pattern and pattern not in self.ctl.settings.rename_presets:
             self.ctl.settings.rename_presets.append(pattern)

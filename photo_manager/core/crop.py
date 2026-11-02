@@ -54,7 +54,7 @@ def upright_size(path: str) -> tuple[int, int]:
     return (h, w) if orientation in (5, 6, 7, 8) else (w, h)
 
 
-def _save_params(fmt: str, src: Image.Image) -> dict:
+def _save_params(fmt: str, src: Image.Image, quality: int | None = None) -> dict:
     params: dict = {}
     icc = src.info.get("icc_profile")
     if icc:
@@ -64,32 +64,52 @@ def _save_params(fmt: str, src: Image.Image) -> dict:
         exif[0x0112] = 1
         params["exif"] = exif.tobytes()
     if fmt == "JPEG":
-        params.update(quality=95, optimize=True)
+        params.update(quality=quality or 95, optimize=True)
     elif fmt in ("WEBP", "HEIF", "AVIF"):
-        params["quality"] = 92
+        params["quality"] = quality or 92
     return params
 
 
-def crop_to_file(path: str, box: tuple[int, int, int, int], out_path: str,
-                 et: "ExifTool | None" = None) -> None:
-    """Write the cropped image to out_path (same format as path)."""
-    left, top, right, bottom = box
+def _flatten(im: Image.Image) -> Image.Image:
+    """For JPEG: put transparent images on white instead of black."""
+    if im.mode in ("RGB", "L", "CMYK"):
+        return im
+    if im.mode == "P":
+        im = im.convert("RGBA")
+    if im.mode in ("RGBA", "LA"):
+        background = Image.new("RGB", im.size, "white")
+        background.paste(im.convert("RGBA"), mask=im.convert("RGBA").getchannel("A"))
+        return background
+    return im.convert("RGB")
+
+
+def export_image(path: str, out_path: str, et: "ExifTool | None" = None, *,
+                 box: tuple[int, int, int, int] | None = None, fmt: str | None = None,
+                 quality: int | None = None) -> None:
+    """Save path to out_path upright, optionally cropped and/or in another format
+    (fmt is a Pillow format name like "JPEG"; default: same as the source).
+    Metadata and file dates are copied from the original."""
     with Image.open(path) as src:
-        fmt = src.format or ""
+        src_fmt = src.format or ""
+        src.seek(0)
         upright = ImageOps.exif_transpose(src)  # before _save_params resets Orientation
-        params = _save_params(fmt, src)
-    width, height = upright.size
-    left, top = max(0, int(left)), max(0, int(top))
-    right, bottom = min(width, int(right)), min(height, int(bottom))
-    if right - left < 2 or bottom - top < 2:
-        raise CropError("The crop area is too small.")
-    cropped = upright.crop((left, top, right, bottom))
-    if fmt == "JPEG" and cropped.mode not in ("RGB", "L", "CMYK"):
-        cropped = cropped.convert("RGB")
-    if fmt == "GIF":
+        out_fmt = fmt or {"MPO": "JPEG"}.get(src_fmt, src_fmt) or "PNG"
+        params = _save_params(out_fmt, src, quality)
+    image = upright
+    if box is not None:
+        width, height = upright.size
+        left, top, right, bottom = box
+        left, top = max(0, int(left)), max(0, int(top))
+        right, bottom = min(width, int(right)), min(height, int(bottom))
+        if right - left < 2 or bottom - top < 2:
+            raise CropError("The crop area is too small.")
+        image = upright.crop((left, top, right, bottom))
+    if out_fmt == "JPEG":
+        image = _flatten(image)
+    if out_fmt == "GIF":
         params.pop("exif", None)
-    save_format = {"MPO": "JPEG"}.get(fmt, fmt) or None
-    cropped.save(out_path, save_format, **params)
+    image.save(out_path, out_fmt, **params)
+    cropped = image
 
     if et is not None:
         error = et.write(out_path, [
@@ -104,6 +124,12 @@ def crop_to_file(path: str, box: tuple[int, int, int, int], out_path: str,
     else:
         st = os.stat(path)
         os.utime(out_path, (st.st_atime, st.st_mtime))
+
+
+def crop_to_file(path: str, box: tuple[int, int, int, int], out_path: str,
+                 et: "ExifTool | None" = None) -> None:
+    """Write the cropped image to out_path (same format as path)."""
+    export_image(path, out_path, et, box=box)
 
 
 def save_crop(path: str, box: tuple[int, int, int, int], et: "ExifTool | None" = None,

@@ -56,3 +56,18 @@ def test_wildcards_and_case_insensitivity():
 def test_bad_patterns_are_rejected(pattern):
     with pytest.raises(TemplateError):
         compile_pattern(pattern)
+
+
+def test_rename_pattern_regex_flags_misnamed_files():
+    from photo_manager.core.templates import follows_pattern, rename_pattern_regex
+
+    rx = rename_pattern_regex("{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}")
+    assert follows_pattern("08-15-2026 11-42-44 AM.jpg", rx)
+    assert follows_pattern("08-15-2026 11-42-44 pm_2.HEIC", rx)
+    for bad in ("IMG_20261023_000100_926_19.jpg", "08-15-2026 11-42-44.jpg",
+                "08-15-2026 11-42-44 AM copy.jpg", "2026-08-15_11-42-44.jpg"):
+        assert not follows_pattern(bad, rx), bad
+    named = rename_pattern_regex("{YYYY}-{MM}-{DD} {name}")
+    assert follows_pattern("2026-08-15 beach.jpg", named)
+    assert rename_pattern_regex("{name}") is None  # no date: nothing is flagged
+    assert follows_pattern("anything.jpg", None)

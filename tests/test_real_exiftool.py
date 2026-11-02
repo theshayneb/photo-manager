@@ -82,3 +82,18 @@ def test_crop_keeps_metadata(et, tmp_path):
     assert meta.image_size == "18x14"
     if sys.platform == "win32":
         assert meta.file_created == DT
+
+
+def test_convert_heic_to_jpg_keeps_metadata(et, tmp_path):
+    from photo_manager.core.convert import convert_file
+
+    path = make(tmp_path, "phone.heic")
+    et.write(path, date_args(path, DT, set_file_dates=True))
+    et.write(path, keyword_args(path, add=["josh"]))
+    et.write(path, label_args("Blue"))
+    out = convert_file(path, "JPG", 90, et)
+    meta = read(et, out)
+    assert out.endswith("phone.jpg")
+    assert meta.date_taken == DT and meta.keywords == ["josh"] and meta.label == "Blue"
+    if sys.platform == "win32":
+        assert meta.file_created == DT

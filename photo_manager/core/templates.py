@@ -147,3 +147,21 @@ DEFAULT_TEMPLATES = [
     FilenameTemplate("Digits only (YYYYMMDDHHMMSS)", "{YYYY}{MM}{DD}{HH}{mm}{ss}"),
     FilenameTemplate("Anything with YYYYMMDD_HHMMSS", "*{YYYY}{MM}{DD}?{HH}{mm}{ss}"),
 ]
+
+
+def rename_pattern_regex(pattern: str) -> re.Pattern[str] | None:
+    """A regex that fully matches a file name (without extension) produced by a
+    rename pattern, including the "_1", "_2" added for duplicates. None if the
+    pattern has no date in it (then nothing is flagged)."""
+    try:
+        compiled = compile_pattern(pattern.replace("{name}", "*"))
+    except TemplateError:
+        return None
+    return re.compile(rf"(?:{compiled.pattern})(?:_\d+)?", re.IGNORECASE)
+
+
+def follows_pattern(filename: str, regex: re.Pattern[str] | None) -> bool:
+    if regex is None:
+        return True
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    return regex.fullmatch(stem) is not None

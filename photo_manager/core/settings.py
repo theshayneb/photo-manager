@@ -69,6 +69,11 @@ class Settings:
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
     crop_as_copy: bool = False
+    convert_target: str = "JPG"
+    convert_quality: int = 92
+    convert_recycle: bool = False
+    highlight_misnamed: bool = True
+    type_badges: bool = True
     migrations: list[str] = field(default_factory=list)
     window_geometry: str = ""
     window_state: str = ""

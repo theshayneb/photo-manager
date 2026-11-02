@@ -132,7 +132,7 @@ def test_rename_by_date(window):
     win.sidebar.dates.apply_filename()
     settle(win)
     select(win, "IMG_20261023_000100_358_3.jpg")
-    assert "10-23-2026 12-01-00 AM.jpg" in win.sidebar.rename.example.text()
+    assert win.sidebar.rename.preview_rows() == [("IMG_20261023_000100_358_3.jpg", "10-23-2026 12-01-00 AM.jpg")]
     win.sidebar.rename.apply()
     settle(win)
     assert (folder / "10-23-2026 12-01-00 AM.jpg").exists()
@@ -231,7 +231,7 @@ def test_rename_with_exif_create_date_and_name_token(window):
     panel = win.sidebar.rename
     panel.source.setCurrentIndex(panel.source.findData("created"))
     panel.pattern.setCurrentText("{YYYY}-{MM}-{DD} {name}")
-    assert "2025-01-02 vacation.jpg" in panel.example.text()
+    assert panel.preview_rows() == [("vacation.jpg", "2025-01-02 vacation.jpg")]
     panel.apply()
     settle(win)
     assert (folder / "2025-01-02 vacation.jpg").exists()
@@ -537,3 +537,84 @@ def test_rename_default_is_us_format(window, tmp_path):
     s.rename_pattern = "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"  # choosing the old one again later sticks
     s.save()
     assert Settings.load(path).rename_pattern == "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"
+
+
+def test_misnamed_files_are_flagged_and_selectable(window):
+    win, folder, et = window
+    # None of the sample files follow "08-15-2026 11-42-44 AM".
+    assert len(win.misnamed_paths()) == 3
+    assert "not in rename format" in win.status.text()
+    item = win.model.item(str(folder / "vacation.jpg"))
+    assert win.grid.delegate.is_misnamed(item)
+    win.select_misnamed()
+    assert len(win.grid.selected_paths()) == 3
+    # Rename one into the format; it stops being flagged.
+    et.write(str(folder / "vacation.jpg"), ["-AllDates=2026:08:15 11:42:44"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg")
+    win.sidebar.rename.apply()
+    settle(win)
+    assert len(win.misnamed_paths()) == 2
+    # Turning the highlight off clears it.
+    win._toggle_misnamed(False)
+    assert win.misnamed_paths() == [] and "not in rename format" not in win.status.text()
+
+
+def test_type_badges_labels():
+    from photo_manager.ui.grid import type_label
+
+    assert [type_label(p) for p in ("a.jpeg", "b.HEIF", "c.webp", "d.mp4", "e.tiff")] == [
+        "JPG", "HEIC", "WEBP", "MP4", "TIF"]
+
+
+def test_rename_preview_lists_every_file_with_final_names(window):
+    win, folder, et = window
+    for name in ("vacation.jpg", "IMG_20261023_000100_358_3.jpg"):
+        et.write(str(folder / name), ["-AllDates=2026:08:15 11:42:44"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg", "IMG_20261023_000100_358_3.jpg", "Screenshot_20261023-143414.png")
+    rows = dict(win.sidebar.rename.preview_rows())
+    assert sorted([rows["vacation.jpg"], rows["IMG_20261023_000100_358_3.jpg"]]) == [
+        "08-15-2026 11-42-44 AM.jpg", "08-15-2026 11-42-44 AM_1.jpg"]
+    assert rows["Screenshot_20261023-143414.png"] == "no date — skipped"
+    assert win.sidebar.rename.button.text() == "Rename 2 files"
+
+
+def test_convert_from_the_window(window, monkeypatch):
+    win, folder, _ = window
+    from photo_manager.ui import main_window
+
+    class FakeConvert:
+        def __init__(self, paths, settings, parent=None):
+            self.paths = paths
+            settings.convert_target, settings.convert_recycle = "JPG", False
+
+        def exec(self):
+            return True
+
+        def to_convert(self):
+            return [p for p in self.paths if p.endswith(".png")]
+
+    monkeypatch.setattr(main_window, "ConvertDialog", FakeConvert)
+    select(win, "Screenshot_20261023-143414.png", "vacation.jpg")
+    win.convert_selected()
+    settle(win)
+    new = folder / "Screenshot_20261023-143414.jpg"
+    assert new.exists() and (folder / "Screenshot_20261023-143414.png").exists()
+    assert win.grid.selected_paths() == [str(new)]
+    assert win.model.item(str(new)) is not None
+
+
+def test_convert_dialog_counts(qapp, tmp_path):
+    from photo_manager.core.settings import Settings
+    from photo_manager.ui.dialogs import ConvertDialog
+
+    s = Settings()
+    dlg = ConvertDialog(["a.heic", "b.webp", "c.jpg", "d.mp4"], s)
+    assert dlg.to_convert() == ["a.heic", "b.webp"]
+    assert dlg.ok.text() == "Convert 2"
+    dlg.target.setCurrentText("PNG")
+    assert dlg.to_convert() == ["a.heic", "b.webp", "c.jpg"]
+    assert not dlg.quality.isEnabled()

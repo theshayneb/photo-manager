@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from . import __version__
@@ -41,9 +43,10 @@ def self_test(out_path: str) -> int:
         result["exiftool"] = et.execute("-ver")[0].strip() if et else None
         result["heic"] = ".heic" in Image.registered_extensions()
         result["avif"] = bool(features.check("avif"))
+        result["icon"] = ICON.exists()
         window = MainWindow(settings, et)
         window.close()
-        result["ok"] = bool(result["exiftool"] and result["heic"])
+        result["ok"] = bool(result["exiftool"] and result["heic"] and result["icon"])
     except Exception as exc:  # noqa: BLE001
         result["error"] = repr(exc)
         result["ok"] = False
@@ -86,9 +89,26 @@ def install_error_handler() -> None:
     sys.excepthook = hook
 
 
+ICON = Path(__file__).resolve().parent / "assets" / "icon.png"
+
+
+def set_app_icon(app: QApplication) -> None:
+    if sys.platform == "win32":
+        # Its own taskbar identity, so Windows shows our icon rather than Python's.
+        import ctypes
+
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PhotoManager.PhotoManager")
+        except (AttributeError, OSError):
+            pass
+    if ICON.exists():
+        app.setWindowIcon(QIcon(str(ICON)))
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv)
     app = QApplication(argv)
+    set_app_icon(app)
     if "--self-test" in argv:
         return self_test(argv[argv.index("--self-test") + 1])
     app.setApplicationName("Photo Manager")
