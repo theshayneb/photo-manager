@@ -2,13 +2,29 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $dest = Join-Path $root "vendor\exiftool"
-$version = (Invoke-WebRequest "https://exiftool.org/ver.txt" -UseBasicParsing).Content.Trim()
+# Last version known to have a Windows zip; used only if exiftool.org can't be reached.
+$fallbackVersion = "13.60"
+
+function Get-WithRetry([string]$url, [int]$tries = 3) {
+    for ($i = 1; $i -le $tries; $i++) {
+        try { return Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 30 -UserAgent "curl/8" }
+        catch {
+            Write-Host "  attempt $i for $url failed: $($_.Exception.Message)"
+            if ($i -lt $tries) { Start-Sleep -Seconds (5 * $i) }
+        }
+    }
+    return $null
+}
+
+$verResponse = Get-WithRetry "https://exiftool.org/ver.txt"
+$version = if ($verResponse) { $verResponse.Content.Trim() } else { $fallbackVersion }
+Write-Host "ExifTool version: $version"
 $zipName = "exiftool-$($version)_64.zip"
 
 # Prefer the exact Windows zip linked from the home page; fall back to known locations.
 $candidates = @()
 try {
-    $home_page = (Invoke-WebRequest "https://exiftool.org/" -UseBasicParsing).Content
+    $home_page = (Get-WithRetry "https://exiftool.org/" 2).Content
     foreach ($m in [regex]::Matches($home_page, 'href="([^"]*exiftool-[\d.]+_64\.zip)"')) {
         $href = $m.Groups[1].Value
         if ($href -notmatch '^https?://') { $href = "https://exiftool.org/" + $href.TrimStart("/") }
@@ -24,7 +40,7 @@ try {
     foreach ($url in ($candidates | Select-Object -Unique)) {
         try {
             Write-Host "Downloading $url"
-            Invoke-WebRequest $url -OutFile (Join-Path $tmp $zipName) -UseBasicParsing -UserAgent "curl/8"
+            Invoke-WebRequest $url -OutFile (Join-Path $tmp $zipName) -UseBasicParsing -UserAgent "curl/8" -TimeoutSec 120
             $ok = $true
             break
         } catch { Write-Host "  failed: $($_.Exception.Message)" }
