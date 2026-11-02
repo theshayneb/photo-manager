@@ -746,3 +746,23 @@ def test_old_settings_get_new_label_hotkeys(tmp_path):
     path.write_text(json.dumps({"label_hotkeys": {"Red": "F6"}}))
     s = Settings.load(path)
     assert s.label_hotkeys["Red"] == "F6" and s.label_hotkeys["Star"] == "Ctrl+S"
+
+
+def test_none_clears_color_star_and_bookmark(window):
+    win, folder, et = window
+    select(win, "vacation.jpg")
+    win._label_shortcut("Green")
+    settle(win)
+    win._flag_shortcut("Star")
+    settle(win)
+    win._flag_shortcut("Bookmark")
+    settle(win)
+    win._clear_labels_shortcut()
+    settle(win)
+    meta = meta_of(et, folder / "vacation.jpg")
+    assert meta.label == "" and not meta.starred and not meta.bookmarked
+    # None sits after the icons on the same row.
+    panel = win.sidebar.labels
+    QApplication.processEvents()
+    assert panel.clear.y() == panel.buttons["Red"].y()  # same row
+    assert panel.clear.x() > panel.flag_buttons["Bookmark"].x() > panel.buttons["Purple"].x()

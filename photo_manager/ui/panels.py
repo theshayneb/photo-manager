@@ -142,10 +142,6 @@ class LabelPanel(QWidget):
             btn.clicked.connect(lambda _=False, name=label: self.apply(name))
             row.addWidget(btn)
             self.buttons[label] = btn
-        self.clear = QPushButton("None")
-        self.clear.setProperty("compact", True)
-        self.clear.clicked.connect(lambda: self.apply(""))
-        row.addWidget(self.clear)
         row.addSpacing(6)
         self.flag_buttons: dict[str, QPushButton] = {}
         for flag, text in (("Star", "★"), ("Bookmark", "🔖")):
@@ -156,6 +152,11 @@ class LabelPanel(QWidget):
             btn.clicked.connect(lambda _=False, f=flag: self.toggle_flag(f))
             row.addWidget(btn)
             self.flag_buttons[flag] = btn
+        row.addSpacing(6)
+        self.clear = QPushButton("None")
+        self.clear.setProperty("compact", True)
+        self.clear.clicked.connect(self.clear_all)
+        row.addWidget(self.clear)
         row.addStretch(1)
         hotkeys = QToolButton()
         hotkeys.setText("⌨")
@@ -174,7 +175,7 @@ class LabelPanel(QWidget):
 
         for label, btn in self.buttons.items():
             btn.setToolTip(tip(label, label))
-        self.clear.setToolTip(tip("None", "Remove the color label"))
+        self.clear.setToolTip(tip("None", "Remove all labels (color, star and bookmark)"))
         self.flag_buttons["Star"].setToolTip(tip("Star", "Star (saved as a 5-star rating)"))
         self.flag_buttons["Bookmark"].setToolTip(tip("Bookmark", "Bookmark"))
 
@@ -196,6 +197,14 @@ class LabelPanel(QWidget):
             label = ""
         self.ctl.write_metadata([(i.path, label_args(label)) for i in targets],
                                 f"label {label or 'cleared'}")
+
+    def clear_all(self) -> None:
+        """None: remove the color label, the Star and the Bookmark."""
+        targets = _writable(self.items)
+        if not targets:
+            return
+        args = label_args("") + flag_args("Star", False)[1:] + flag_args("Bookmark", False)[1:]
+        self.ctl.write_metadata([(i.path, args) for i in targets], "labels cleared")
 
     def toggle_flag(self, flag: str) -> None:
         targets = _writable(self.items)

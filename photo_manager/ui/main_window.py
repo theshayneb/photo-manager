@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
             sc.deleteLater()
         self.label_shortcuts = []
         actions = {label: (lambda name=label: self._label_shortcut(name)) for label in LABELS}
-        actions["None"] = lambda: self._label_shortcut("")
+        actions["None"] = self._clear_labels_shortcut
         actions["Star"] = lambda: self._flag_shortcut("Star")
         actions["Bookmark"] = lambda: self._flag_shortcut("Bookmark")
         for name, slot in actions.items():
@@ -373,6 +373,10 @@ class MainWindow(QMainWindow):
             self.settings.save()
             self._build_label_shortcuts()
             self.sidebar.labels.update_tooltips()
+
+    def _clear_labels_shortcut(self) -> None:
+        self.refresh_sidebar()
+        self.sidebar.labels.clear_all()
 
     def _flag_shortcut(self, flag: str) -> None:
         self.refresh_sidebar()
@@ -925,10 +929,11 @@ class MainWindow(QMainWindow):
         labels = menu.addMenu("Labels")
         keys = self.settings.label_hotkeys
         entries = [(label, label, lambda name=label: self._label_shortcut(name)) for label in LABELS]
-        entries.append(("None", "No color", lambda: self._label_shortcut("")))
         entries.append(None)
         entries.append(("Star", "★ Star", lambda: self._flag_shortcut("Star")))
         entries.append(("Bookmark", "🔖 Bookmark", lambda: self._flag_shortcut("Bookmark")))
+        entries.append(None)
+        entries.append(("None", "None (remove all labels)", self._clear_labels_shortcut))
         for entry in entries:
             if entry is None:
                 labels.addSeparator()

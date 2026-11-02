@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- **None** moved to the end of the Labels row and now removes everything: the color, ★ and 🔖 (also Ctrl+0).
+
 ## 0.7.2
 
 - Labels panel fits on one row: colors, a smaller None, ★, 🔖 and a ⌨ hotkeys button.
