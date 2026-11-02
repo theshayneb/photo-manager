@@ -26,3 +26,23 @@ def new_york_tz(monkeypatch):
 def isolated_appdata(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+
+
+@pytest.fixture(autouse=True)
+def close_all_windows():
+    """Close and delete every window/dialog a test leaves behind, while Qt is still running.
+
+    Leftover widgets were otherwise destroyed during interpreter shutdown, sometimes after
+    Qt itself, which crashed the test process after every test had passed."""
+    yield
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in QApplication.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()

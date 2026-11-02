@@ -1,3 +1,3 @@
 """Photo Manager: a simple Windows photo browser for dates, keywords and labels."""
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"

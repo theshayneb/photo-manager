@@ -1003,3 +1003,26 @@ def test_closing_waits_for_thumbnail_threads(qapp, tmp_path):
         win.model._request_thumb(item)
     win.close()  # straight away, while they're loading
     assert win.model._pool.activeThreadCount() == 0
+
+
+def test_video_preview_shows_thumbnail_and_marks_before_playing(window):
+    win, folder, _ = window
+    if not win.preview.video.available:
+        pytest.skip("Qt multimedia not available")
+    clip = folder / "clip.mp4"
+    _make_video(clip)
+    win.open_folder(str(folder))
+    settle(win)
+    win.grid.select_paths([str(clip)], current=str(clip))
+    win.open_preview()
+    screen = win.preview.video.video
+    assert not screen.poster.isNull()  # a still frame instead of a black box
+    assert not screen.picture_rect().isEmpty()
+    win._label_shortcut("Blue")
+    settle(win)
+    path, kind, meta, show_type = screen.marks
+    assert path == str(clip) and kind == "video" and show_type and meta.label == "Blue"
+    image = screen.grab().toImage()
+    center = image.pixelColor(image.width() // 2, image.height() // 2)
+    assert (center.red(), center.green(), center.blue()) != (0, 0, 0)  # not black
+    win.close_preview()

@@ -490,7 +490,8 @@ class PreviewPane(QWidget):
         self.caption.setText(caption)
         self.cancel_crop()
         if kind == "video" and self.video.available:
-            self.video.load(path)
+            longest = max(1280, max(self.width(), self.height()))
+            self.video.load(path, poster=load_display_pixmap(path, "video", longest))
             self.pages.setCurrentWidget(self.video)
             self.crop_btn.setEnabled(False)
             self.crop_btn.setToolTip("Crop works on photos")
@@ -515,7 +516,9 @@ class PreviewPane(QWidget):
 
     def update_marks(self, meta) -> None:  # type: ignore[no-untyped-def]
         """Redraw the badges/labels (e.g. after a label hotkey) without reloading the image."""
-        self.canvas.set_marks(self.path, self.kind, meta, bool(getattr(self.settings, "type_badges", True)))
+        show_type = bool(getattr(self.settings, "type_badges", True))
+        self.canvas.set_marks(self.path, self.kind, meta, show_type)
+        self.video.set_marks(self.path, self.kind, meta, show_type)
 
     def _ratio_value(self) -> float | None:
         value = ASPECT_RATIOS.get(self.ratio.currentText())

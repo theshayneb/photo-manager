@@ -7,8 +7,8 @@ can move/delete/rename it straight away.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QRect, QRectF, QSizeF, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -19,9 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .grid import paint_flags, paint_label_frame, paint_type_badge
+
 try:
-    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-    from PySide6.QtMultimediaWidgets import QVideoWidget
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 
     HAVE_MULTIMEDIA = True
 except ImportError:  # pragma: no cover - Qt built without multimedia
@@ -35,8 +36,65 @@ def _fmt(ms: int) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
-class _ClickableVideo(QVideoWidget if HAVE_MULTIMEDIA else QWidget):  # type: ignore[misc]
+class _VideoScreen(QWidget):
+    """Paints the current video frame (or the still thumbnail before playback starts),
+    fitted to the widget, with the type badge, ★/🔖 and color-label frame on top."""
+
     clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.frame = QImage()     # latest decoded frame
+        self.poster = QPixmap()   # shown until the first frame arrives
+        self.marks: tuple = ("", "", None, True)  # path, kind, meta, show_type
+
+    def set_poster(self, pixmap: QPixmap | None) -> None:
+        self.poster = pixmap or QPixmap()
+        self.frame = QImage()
+        self.update()
+
+    def set_frame(self, image: QImage) -> None:
+        if not image.isNull():
+            self.frame = image
+            self.update()
+
+    def clear(self) -> None:
+        self.frame = QImage()
+        self.poster = QPixmap()
+        self.update()
+
+    def picture_rect(self) -> QRect:
+        if not self.frame.isNull():
+            size = QSizeF(self.frame.size())
+        elif not self.poster.isNull():
+            size = QSizeF(self.poster.size())
+        else:
+            return QRect()
+        area = QRectF(self.rect())
+        size.scale(area.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        rect = QRectF(0, 0, size.width(), size.height())
+        rect.moveCenter(area.center())
+        return rect.toRect()
+
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("black"))
+        target = self.picture_rect()
+        if target.isEmpty():
+            return
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if not self.frame.isNull():
+            painter.drawImage(target, self.frame)
+        else:
+            painter.drawPixmap(target, self.poster)
+        path, kind, meta, show_type = self.marks
+        if path:
+            scale = 1.6
+            paint_label_frame(painter, target.adjusted(5, 5, -5, -5), meta, scale)
+            paint_flags(painter, target, meta, scale)
+            if show_type:
+                paint_type_badge(painter, target, path, kind, self.font(), scale)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -55,7 +113,13 @@ class VideoView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        self.video = _ClickableVideo()
+        # The player is created BEFORE the picture area: Qt deletes children in creation
+        # order, and the player must go first or it calls into a destroyed video item.
+        self.player = QMediaPlayer(self) if HAVE_MULTIMEDIA else None
+        self.audio = QAudioOutput(self) if HAVE_MULTIMEDIA else None
+        self.sink = QVideoSink(self) if HAVE_MULTIMEDIA else None
+
+        self.video = _VideoScreen()
         self.video.clicked.connect(self.toggle_play)
         layout.addWidget(self.video, 1)
 
@@ -80,13 +144,10 @@ class VideoView(QWidget):
             bar.addWidget(widget, 1 if widget is self.slider else 0)
         layout.addLayout(bar)
 
-        self.player = None
-        self.audio = None
-        if HAVE_MULTIMEDIA:
-            self.player = QMediaPlayer(self)
-            self.audio = QAudioOutput(self)
+        if self.player is not None:
             self.player.setAudioOutput(self.audio)
-            self.player.setVideoOutput(self.video)
+            self.player.setVideoSink(self.sink)
+            self.sink.videoFrameChanged.connect(self._frame)
             self.player.positionChanged.connect(self._position)
             self.player.durationChanged.connect(self._duration)
             self.player.playbackStateChanged.connect(self._state)
@@ -96,11 +157,24 @@ class VideoView(QWidget):
     def available(self) -> bool:
         return self.player is not None
 
+    def shutdown(self) -> None:
+        """Stop and detach the player from the picture (called when the app closes)."""
+        self.stop()
+        if self.player is not None:
+            self.sink.videoFrameChanged.disconnect(self._frame)
+            self.player.setVideoSink(None)
+            self.player.setAudioOutput(None)
+
     # -- loading --
 
-    def load(self, path: str) -> None:
+    def set_marks(self, path: str, kind: str, meta, show_type: bool) -> None:  # type: ignore[no-untyped-def]
+        self.video.marks = (path, kind, meta, show_type)
+        self.video.update()
+
+    def load(self, path: str, poster: QPixmap | None = None) -> None:
         self.stop()
         self.path = path
+        self.video.set_poster(poster)  # still frame until playback starts
         if not self.player:
             return
         self.audio.setMuted(True)  # always start muted
@@ -115,6 +189,7 @@ class VideoView(QWidget):
             self.player.stop()
             self.player.setSource(QUrl())
         self.path = ""
+        self.video.clear()
         self.slider.setRange(0, 0)
         self.time.setText("0:00 / 0:00")
         self.play_btn.setText("▶")
@@ -157,7 +232,13 @@ class VideoView(QWidget):
         self.time.setText(f"{_fmt(self.slider.value())} / {_fmt(duration)}")
 
     def _state(self, _state) -> None:  # type: ignore[no-untyped-def]
-        self.play_btn.setText("⏸" if self.is_playing() else "▶")
+        playing = self.is_playing()
+        self.play_btn.setText("⏸" if playing else "▶")
+
+
+    def _frame(self, frame) -> None:  # type: ignore[no-untyped-def]
+        if self.path and frame.isValid():
+            self.video.set_frame(frame.toImage())
 
     def _status(self, status) -> None:  # type: ignore[no-untyped-def]
         if status == QMediaPlayer.MediaStatus.EndOfMedia:

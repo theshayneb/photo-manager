@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2
+
+- Videos in the big preview show their thumbnail until you press play (instead of a black box), and the file-type
+  badge, ★/🔖 and color-label frame are drawn on top of the video too.
+- The video picture is now drawn by the app itself, frame by frame.
+- Closing the app deletes its window while Qt is still running (more orderly shutdown).
+
 ## 0.8.1
 
 - Fixed: closing the app while thumbnails were still loading could crash it on exit. It now cancels and waits for

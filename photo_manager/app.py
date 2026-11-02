@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -125,5 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.load()
     apply_theme(settings.theme, app)
     window = MainWindow(settings, start_exiftool(settings))
+    # Delete the window as soon as it's closed, while Qt is still running. Otherwise it
+    # survives until Python shuts down and can be destroyed after Qt -> crash on exit.
+    window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     window.show()
-    return app.exec()
+    code = app.exec()
+    del window
+    return code
