@@ -74,6 +74,7 @@ class Settings:
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
     crop_as_copy: bool = False
+    video_autoplay: bool = False
     label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"
     convert_quality: int = 92

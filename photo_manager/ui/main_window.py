@@ -9,28 +9,54 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QDir, QMimeData, QModelIndex, Qt, QTimer, QUrl
 from PySide6.QtGui import (
-    QAction, QActionGroup, QCloseEvent, QDesktopServices, QKeySequence, QShortcut,
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QDesktopServices,
+    QKeySequence,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
-    QLineEdit, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
-    QSlider, QSplitter, QStackedWidget, QToolBar, QVBoxLayout, QWidget,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDockWidget,
+    QFileSystemModel,
+    QLabel,
+    QLineEdit,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QScrollArea,
+    QSlider,
+    QSplitter,
+    QStackedWidget,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..core import dates, fileops
 from ..core.convert import convert_file, needs_conversion
 from ..core.crop import can_crop, save_crop
-from ..core.templates import follows_pattern, rename_pattern_regex
-from ..core.winshell import open_with, show_properties
 from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
-from .dialogs import ConvertDialog, HotkeyDialog, MoveDialog, RenameDialog, TemplateDialog
+from ..core.templates import follows_pattern, rename_pattern_regex
+from ..core.winshell import open_with, show_properties
+from .dialogs import (
+    ConvertDialog,
+    HotkeyDialog,
+    MoveDialog,
+    RenameDialog,
+    TemplateDialog,
+)
+from .folders import FavoritesList, FolderTree
 from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
 from .panels import PANELS, Sidebar
-from .theme import THEMES, apply_theme
-from .folders import FavoritesList, FolderTree
 from .preview import PreviewPane
+from .theme import THEMES, apply_theme
 from .viewer import Viewer
 from .workers import Background
 
@@ -90,6 +116,8 @@ class MainWindow(QMainWindow):
         self.preview.navigate.connect(self._preview_step)
         self.preview.delete_requested.connect(self._preview_delete)
         self.preview.crop_requested.connect(self.crop_file)
+        self.preview.active_changed.connect(self._compare_active)
+        self.compare_paths: list[str] = []
         self.stack = QStackedWidget()
         self.stack.addWidget(self.grid)
         self.stack.addWidget(self.preview)
@@ -648,9 +676,18 @@ class MainWindow(QMainWindow):
             if {_key(p) for p in selected} & {_key(p) for p in metas}:
                 self._schedule_refresh()
 
+    def _release_video(self, paths) -> bool:  # type: ignore[no-untyped-def]
+        """If the previewed video is one of paths, stop it so Windows lets us change the file."""
+        if self.previewing and self.preview.showing_video and \
+                any(_key(p) == _key(self.preview.path) for p in paths):
+            self.preview.stop_video()
+            return True
+        return False
+
     def write_metadata(self, jobs: list[tuple[str, list[str]]], what: str) -> None:
         if not jobs or self.et is None:
             return
+        reload_video = self._release_video([p for p, _ in jobs])
         et = self.et
         self.status.setText(f"Saving {what} to {len(jobs)} file(s)…")
 
@@ -671,6 +708,8 @@ class MainWindow(QMainWindow):
                 self.model.refresh_file(path)
             self._meta_loaded(metas, None)
             self.refresh_sidebar()
+            if reload_video and self.previewing:
+                self._preview_show_current()
             saved = len(jobs) - len(errors)
             self.status.setText(f"Saved {what} to {saved} file(s)." + (f" {len(errors)} failed." if errors else ""))
             if errors:
@@ -797,6 +836,8 @@ class MainWindow(QMainWindow):
             if failures:
                 QMessageBox.warning(self, verb, "\n".join(f"{p}: {e}" for p, e in failures[:10]))
 
+        if not copy:
+            self._release_video(paths)
         work = fileops.copy if copy else fileops.move
         self.bg.run(lambda: work(paths, folder), done)
 
@@ -810,12 +851,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1500, check)
 
     def rename_files(self, plan: dict[str, str]) -> None:
+        reload_video = self._release_video(list(plan))
         def done(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
             if error:
                 QMessageBox.warning(self, "Rename", error)
                 return
             renamed, failures = result
             self.model.rename_paths(renamed)
+            if reload_video and self.previewing:
+                self.grid.select_paths(list(renamed.values())[:1] or list(plan)[:1])
+                self._preview_show_current()
             self.regroup(select=list(renamed.values()) + [p for p, _ in failures])
             self._show_count()
             self.status.setText(self.status.text() + f"   ·   Renamed {len(renamed)} file(s).")
@@ -920,7 +965,10 @@ class MainWindow(QMainWindow):
                 action.setShortcutVisibleInContextMenu(True)
             action.setEnabled(enabled)
 
-        add("Preview", self.open_preview, "Shift+P")
+        if 2 <= len(paths):
+            add(f"Compare {min(len(paths), self.MAX_COMPARE)} side by side", self.open_preview, "Shift+P")
+        else:
+            add("Preview", self.open_preview, "Shift+P")
         add("View", self.open_viewer, "Return")
         add("Open", self.open_external_selected, "Ctrl+O")
         if windows:
@@ -1003,20 +1051,51 @@ class MainWindow(QMainWindow):
     def previewing(self) -> bool:
         return self.stack.currentWidget() is self.preview
 
+    MAX_COMPARE = 4
+
     def open_preview(self) -> None:
-        if not self.grid.current_path():
+        """One photo selected: big preview. 2-4 selected: side-by-side compare."""
+        selected = self.grid.selected_paths()
+        current = self.grid.current_path()
+        if not current and not selected:
             return
+        self.compare_paths = []
+        if len(selected) >= 2:
+            self.compare_paths = selected[: self.MAX_COMPARE]
+            if len(selected) > self.MAX_COMPARE:
+                self.status.setText(f"Comparing the first {self.MAX_COMPARE} of {len(selected)} selected photos.")
+            active = current if current in self.compare_paths else self.compare_paths[0]
+            self.grid.select_paths([active], current=active)
         self.stack.setCurrentWidget(self.preview)
         self._preview_show_current()
         self.preview.setFocus()
 
     def close_preview(self) -> None:
+        self.preview.stop_video()
         self.preview.cancel_crop()
         self.stack.setCurrentWidget(self.grid)
         path = self.grid.current_path()
+        compared = [p for p in getattr(self, "compare_paths", []) if self.model.item(p)]
+        self.compare_paths = []
+        if len(compared) >= 2:  # give the compared photos back as the selection
+            self.grid.select_paths(compared, current=path if path in compared else compared[0])
         if path:
             self.grid.scrollTo(self.model.index(self.model.row_of(path)))
         self.grid.setFocus()
+        self.refresh_sidebar()
+
+    @property
+    def comparing(self) -> bool:
+        return self.previewing and len(getattr(self, "compare_paths", [])) >= 2
+
+    def _compare_active(self, path: str) -> None:
+        """A photo was clicked (or arrowed to) in compare mode: labels/sidebar now act on it."""
+        item = self.model.item(path)
+        if not item:
+            return
+        self.grid.select_paths([path], current=path)
+        self.preview.set_active(path, self._caption(item))
+        self.refresh_sidebar()
 
     def _caption(self, item: Item) -> str:
         position = next((n for n, i in enumerate(self.model.items) if i is item), 0)
@@ -1031,6 +1110,16 @@ class MainWindow(QMainWindow):
         """Labels changed while previewing: update the marks on the preview straight away."""
         if not self.previewing:
             return
+        if self.comparing:
+            for path in self.compare_paths:
+                if any(_key(p) == _key(path) for p in metas):
+                    item = self.model.item(path)
+                    if item:
+                        self.preview.update_marks_for(path, item.meta, self._short_caption(item))
+            active = self.model.item(self.preview.path)
+            if active:
+                self.preview.caption.setText(self._caption(active))
+            return
         path = self.preview.path
         if any(_key(p) == _key(path) for p in metas):
             item = self.model.item(path)
@@ -1038,7 +1127,27 @@ class MainWindow(QMainWindow):
                 self.preview.update_marks(item.meta)
                 self.preview.caption.setText(self._caption(item))
 
+    def _short_caption(self, item: Item) -> str:
+        date = dates.format_display(item.meta.date_taken, self.settings.display_format) \
+            if item.meta and item.meta.date_taken else ""
+        return f"<b>{item.name}</b>" + (f"   ·   {date}" if date else "")
+
     def _preview_show_current(self) -> None:
+        compare = [p for p in getattr(self, "compare_paths", []) if self.model.item(p)]
+        self.compare_paths = compare
+        if len(compare) >= 2:
+            path = self.grid.current_path()
+            active = path if path in compare else compare[0]
+            items = [self.model.item(p) for p in compare]
+            self.preview.show_compare(
+                [(i.path, i.kind, i.meta, self._short_caption(i)) for i in items if i],
+                active, self._caption(self.model.item(active)))
+            self.grid.select_paths([active], current=active)
+            self.refresh_sidebar()
+            return
+        if len(compare) == 1:  # down to one photo: back to the normal preview
+            self.grid.select_paths(compare, current=compare[0])
+            self.compare_paths = []
         path = self.grid.current_path()
         item = self.model.item(path) if path else None
         if not item:
@@ -1048,6 +1157,8 @@ class MainWindow(QMainWindow):
         self.refresh_sidebar()
 
     def _preview_step(self, delta: int) -> None:
+        if self.comparing:
+            return
         path = self.grid.current_path()
         target = self.model.neighbour(path, delta) if path else None
         if target:
@@ -1057,6 +1168,7 @@ class MainWindow(QMainWindow):
     def _preview_delete(self) -> None:
         path = self.grid.current_path()
         if path:
+            self.preview.stop_video()
             self.grid.select_paths([path], current=path)
             self.delete_selected()
 

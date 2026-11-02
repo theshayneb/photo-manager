@@ -48,9 +48,12 @@ def self_test(out_path: str) -> int:
             from .core.winthumb import shell_thumbnail
 
             result["shell_thumbnail"] = shell_thumbnail(str(ICON), 64) is not None
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        result["video"] = QMediaPlayer().isAvailable()
         window = MainWindow(settings, et)
         window.close()
-        result["ok"] = bool(result["exiftool"] and result["heic"] and result["icon"])
+        result["ok"] = bool(result["exiftool"] and result["heic"] and result["icon"] and result["video"])
     except Exception as exc:  # noqa: BLE001
         result["error"] = repr(exc)
         result["ok"] = False

@@ -813,3 +813,176 @@ def test_preview_shows_type_badge_and_labels(window):
     win._toggle_badges(False)
     assert not canvas.show_type
     win.close_preview()
+
+
+@pytest.fixture
+def five_photos(window):
+    win, folder, et = window
+    for n in range(2):
+        Image.new("RGB", (64, 48), "red").save(folder / f"extra{n}.jpg")
+    win.open_folder(str(folder))
+    settle(win)
+    return win, folder, et
+
+
+def _pane_positions(win):
+    grid = win.preview.compare_grid
+    return [grid.getItemPosition(grid.indexOf(p))[:2] for p in win.preview.panes]
+
+
+@pytest.mark.parametrize("count,positions", [
+    (2, [(0, 0), (0, 1)]),
+    (3, [(0, 0), (0, 1), (0, 2)]),
+    (4, [(0, 0), (0, 1), (1, 0), (1, 1)]),
+])
+def test_compare_layouts(five_photos, count, positions):
+    win, _, _ = five_photos
+    paths = [i.path for i in win.model.items[:count]]
+    win.grid.select_paths(paths)
+    win.open_preview()
+    assert win.comparing and win.preview.comparing
+    assert [p.path for p in win.preview.panes] == paths
+    assert _pane_positions(win) == positions
+    assert not win.preview.crop_btn.isEnabled()
+    win.close_preview()
+    assert sorted(win.grid.selected_paths()) == sorted(paths)  # selection given back
+
+
+def test_compare_more_than_four_uses_first_four(five_photos):
+    win, _, _ = five_photos
+    win.grid.select_paths([i.path for i in win.model.items])
+    win.open_preview()
+    assert len(win.preview.panes) == 4
+    assert "first 4 of 5" in win.status.text()
+    win.close_preview()
+
+
+def test_compare_labels_apply_to_the_clicked_photo_only(five_photos):
+    win, folder, et = five_photos
+    a, b, c = [i.path for i in win.model.items[:3]]
+    win.grid.select_paths([a, b, c])
+    win.open_preview()
+    assert win.preview.path == a and win.preview.panes[0].active
+    win.preview.panes[1].clicked.emit(b)  # click the second photo
+    assert win.preview.path == b and win.preview.panes[1].active and not win.preview.panes[0].active
+    assert win.grid.selected_paths() == [b]  # sidebar / hotkeys now act on b
+    win._flag_shortcut("Star")
+    settle(win)
+    win._label_shortcut("Yellow")
+    settle(win)
+    assert meta_of(et, b).starred and meta_of(et, b).label == "Yellow"
+    assert not meta_of(et, a).starred and not meta_of(et, c).starred
+    pane_b = win.preview.panes[1]
+    assert pane_b.canvas.mark_meta.starred  # marks on that pane updated
+    # Arrow keys move the active photo, wrapping around.
+    win.preview._step_active(1)
+    assert win.preview.path == c
+    win.preview._step_active(1)
+    assert win.preview.path == a
+    win.close_preview()
+
+
+def test_compare_delete_removes_active_and_closes_up(five_photos, monkeypatch):
+    win, folder, _ = five_photos
+    monkeypatch.setattr("photo_manager.core.fileops.send2trash", lambda p: os.remove(p))
+    win.settings.confirm_delete = False
+    a, b, c = [i.path for i in win.model.items[:3]]
+    win.grid.select_paths([a, b, c])
+    win.open_preview()
+    win.preview._step_active(1)
+    win._preview_delete()
+    settle(win)
+    assert not os.path.exists(b)
+    assert [p.path for p in win.preview.panes] == [a, c] and win.comparing
+    win.preview.set_active(a)
+    win.grid.select_paths([a], current=a)
+    win._preview_delete()
+    settle(win)
+    assert not win.comparing and win.previewing  # one left: normal preview
+    assert win.preview.path == c
+    win.close_preview()
+
+
+def test_switching_compare_sets_leaves_no_old_panes(five_photos):
+    win, _, _ = five_photos
+    width = win.width()
+    win.grid.select_paths([i.path for i in win.model.items[:4]])
+    win.open_preview()
+    win.close_preview()
+    win.grid.select_paths([i.path for i in win.model.items[2:5]])
+    win.open_preview()
+    QApplication.processEvents()
+    panes = [w for w in win.preview.compare_host.findChildren(type(win.preview.panes[0])) if w.isVisible()]
+    assert len(panes) == 3 and sum(p.active for p in panes) == 1
+    assert win.width() == width  # long captions don't push the window wider
+    win.close_preview()
+
+
+def _make_video(path):
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("needs ffmpeg to make a test video")
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10",
+                    "-f", "lavfi", "-i", "sine=frequency=440", "-t", "1", "-pix_fmt", "yuv420p",
+                    "-shortest", str(path)], check=True, timeout=60)
+
+
+def test_video_plays_in_preview_muted_with_remembered_autoplay(window):
+    win, folder, _ = window
+    if not win.preview.video.available:
+        pytest.skip("Qt multimedia not available")
+    clip, clip2 = folder / "clip.mp4", folder / "clip2.mp4"
+    _make_video(clip)
+    _make_video(clip2)
+    win.open_folder(str(folder))
+    settle(win)
+    video = win.preview.video
+
+    # Auto-play off (default): loads paused, muted.
+    win.grid.select_paths([str(clip)], current=str(clip))
+    win.open_preview()
+    assert win.preview.showing_video and video.path == str(clip)
+    assert video.is_muted() and not video.is_playing()
+    assert not win.preview.crop_btn.isEnabled()
+
+    # Unmute, then go to the next video: it starts muted again.
+    video.toggle_mute()
+    assert not video.is_muted()
+    video.autoplay.setChecked(True)
+    assert win.settings.video_autoplay is True  # remembered
+    win.grid.select_paths([str(clip2)], current=str(clip2))
+    win._preview_show_current()
+    assert video.path == str(clip2) and video.is_muted()
+
+    # Space toggles play/pause; M toggles sound.
+    from PySide6.QtTest import QTest
+
+    QTest.keyClick(win.preview, Qt.Key.Key_M)
+    assert not video.is_muted()
+    # Leaving the preview stops playback and releases the file.
+    win.close_preview()
+    assert video.path == "" and not video.is_playing()
+
+
+def test_video_is_released_before_its_labels_are_written(window):
+    win, folder, et = window
+    if not win.preview.video.available:
+        pytest.skip("Qt multimedia not available")
+    clip = folder / "clip.mp4"
+    _make_video(clip)
+    win.open_folder(str(folder))
+    settle(win)
+    win.grid.select_paths([str(clip)], current=str(clip))
+    win.open_preview()
+    released = []
+    original = win.preview.stop_video
+    win.preview.stop_video = lambda: (released.append(True), original())
+    win._flag_shortcut("Star")
+    settle(win)
+    assert released  # stopped before writing
+    assert meta_of(et, clip).starred
+    assert win.preview.showing_video  # and shown again afterwards
+    win.close_preview()

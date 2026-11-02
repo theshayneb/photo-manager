@@ -3,15 +3,34 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..core import thumbs
 from ..core.crop import ASPECT_RATIOS, can_crop, upright_size
 from ..core.winthumb import shell_thumbnail
 from .grid import paint_flags, paint_label_frame, paint_type_badge, pil_to_qimage
+from .video import VideoView
 
 HANDLE = 10  # px, grab distance for corners/edges
 
@@ -34,6 +53,7 @@ class CropCanvas(QWidget):
     """
 
     changed = Signal()
+    clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -189,6 +209,8 @@ class CropCanvas(QWidget):
         return "move" if box.contains(pos) else None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if not self.cropping:
+            self.clicked.emit()
         if not self.cropping or event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
         pos = event.position()
@@ -276,13 +298,51 @@ class CropCanvas(QWidget):
         return QRectF(anchor, end).normalized()
 
 
+class ComparePane(QFrame):
+    """One photo in compare mode: the image (with its marks) and a caption. Click to make it active."""
+
+    clicked = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.path = ""
+        self.setObjectName("comparePane")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        self.canvas = CropCanvas()
+        self.canvas.clicked.connect(lambda: self.clicked.emit(self.path))
+        self.caption = QLabel()
+        self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Long names must not make the pane (and the window) wider; they're cut off instead.
+        self.caption.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.canvas.setMinimumSize(80, 80)
+        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.caption)
+        self.set_active(False)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.clicked.emit(self.path)
+        super().mousePressEvent(event)
+
+    def set_active(self, active: bool) -> None:
+        self.active = active
+        self.setStyleSheet(
+            "#comparePane { border: 3px solid palette(highlight); border-radius: 6px; }" if active else
+            "#comparePane { border: 3px solid transparent; border-radius: 6px; }")
+
+
 class PreviewPane(QWidget):
-    """Fills the grid area. Shift+P/Esc close, ←/→ move, C crops, Delete recycles."""
+    """Fills the grid area. Shift+P/Esc close, ←/→ move, C crops, Delete recycles.
+
+    With several photos it shows them side by side (compare mode): 2 or 3 in a row,
+    4 as a 2×2 grid. Clicking a photo makes it the active one."""
 
     closed = Signal()
     navigate = Signal(int)
     delete_requested = Signal()
     crop_requested = Signal(str, tuple, bool)  # path, box, as_copy
+    active_changed = Signal(str)  # compare mode: the photo that was clicked / arrowed to
 
     def __init__(self, settings, parent: QWidget | None = None):  # type: ignore[no-untyped-def]
         super().__init__(parent)
@@ -332,16 +392,110 @@ class PreviewPane(QWidget):
         layout.addWidget(self.crop_bar)
 
         self.canvas = CropCanvas()
-        layout.addWidget(self.canvas, 1)
+        self.compare_host = QWidget()
+        self.compare_grid = QGridLayout(self.compare_host)
+        self.compare_grid.setContentsMargins(0, 0, 0, 0)
+        self.compare_grid.setSpacing(6)
+        self.panes: list[ComparePane] = []
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.canvas)
+        self.pages.addWidget(self.compare_host)
+        self.video = VideoView(settings)
+        self.pages.addWidget(self.video)
+        layout.addWidget(self.pages, 1)
 
     @property
     def cropping(self) -> bool:
         return self.canvas.cropping
 
+    @property
+    def comparing(self) -> bool:
+        return self.pages.currentWidget() is self.compare_host
+
+    @property
+    def showing_video(self) -> bool:
+        return self.pages.currentWidget() is self.video
+
+    def stop_video(self) -> None:
+        """Stop playback and release the file (before it's moved, renamed, deleted or edited)."""
+        self.video.stop()
+
+    # -- compare mode --
+
+    def show_compare(self, items: list[tuple[str, str, object, str]], active: str, caption: str) -> None:
+        """items: (path, kind, meta, caption) for 2-4 photos."""
+        self.cancel_crop()
+        self.stop_video()
+        for pane in self.panes:  # take the old photos out right away (not just "later")
+            self.compare_grid.removeWidget(pane)
+            pane.hide()
+            pane.setParent(None)
+            pane.deleteLater()
+        self.panes = []
+        count = len(items)
+        columns = 2 if count == 4 else count
+        cell_w = max(400, self.width() // max(1, columns))
+        cell_h = max(400, self.height() // (2 if count == 4 else 1))
+        longest = max(1200, max(cell_w, cell_h) * 2)
+        show_type = bool(getattr(self.settings, "type_badges", True))
+        for n, (path, kind, meta, text) in enumerate(items):
+            pane = ComparePane()
+            pane.path = path
+            pixmap = load_display_pixmap(path, kind, longest)
+            full = (pixmap.width(), pixmap.height()) if pixmap else (0, 0)
+            pane.canvas.set_image(pixmap, full, "" if pixmap else "Can't preview this file")
+            pane.canvas.set_marks(path, kind, meta, show_type)
+            pane.caption.setText(text)
+            pane.clicked.connect(self._pane_clicked)
+            self.compare_grid.addWidget(pane, n // columns, n % columns)
+            self.panes.append(pane)
+        for col in range(3):
+            self.compare_grid.setColumnStretch(col, 1 if col < columns else 0)
+        for row in range(2):
+            self.compare_grid.setRowStretch(row, 1 if row < (2 if count == 4 else 1) else 0)
+        self.pages.setCurrentWidget(self.compare_host)
+        self.crop_btn.setEnabled(False)
+        self.crop_btn.setToolTip("Crop works on one photo at a time")
+        self.set_active(active, caption)
+
+    def set_active(self, path: str, caption: str = "") -> None:
+        self.path = path
+        for pane in self.panes:
+            pane.set_active(pane.path == path)
+        if caption:
+            self.caption.setText(caption)
+
+    def _pane_clicked(self, path: str) -> None:
+        if path and path != self.path:
+            self.active_changed.emit(path)
+        self.setFocus()
+
+    def _step_active(self, delta: int) -> None:
+        paths = [p.path for p in self.panes]
+        if self.path in paths:
+            target = paths[(paths.index(self.path) + delta) % len(paths)]
+            self.active_changed.emit(target)
+
+    def update_marks_for(self, path: str, meta, caption: str = "") -> None:  # type: ignore[no-untyped-def]
+        show_type = bool(getattr(self.settings, "type_badges", True))
+        for pane in self.panes:
+            if pane.path == path:
+                pane.canvas.set_marks(path, pane.canvas.mark_kind, meta, show_type)
+                if caption:
+                    pane.caption.setText(caption)
+
     def show_item(self, path: str, kind: str, caption: str, meta=None) -> None:  # type: ignore[no-untyped-def]
+        self.stop_video()
         self.path, self.kind = path, kind
         self.caption.setText(caption)
         self.cancel_crop()
+        if kind == "video" and self.video.available:
+            self.video.load(path)
+            self.pages.setCurrentWidget(self.video)
+            self.crop_btn.setEnabled(False)
+            self.crop_btn.setToolTip("Crop works on photos")
+            self.update_marks(meta)
+            return
         longest = max(2048, max(self.width(), self.height()) * 2)
         pixmap = load_display_pixmap(path, kind, longest)
         full = (0, 0)
@@ -354,7 +508,9 @@ class PreviewPane(QWidget):
                     pass
         message = "" if pixmap else "Can't preview this file"
         self.canvas.set_image(pixmap, full, message)
+        self.pages.setCurrentWidget(self.canvas)
         self.update_marks(meta)
+        self.crop_btn.setToolTip("")
         self.crop_btn.setEnabled(kind == "image" and can_crop(path) and pixmap is not None)
 
     def update_marks(self, meta) -> None:  # type: ignore[no-untyped-def]
@@ -397,6 +553,14 @@ class PreviewPane(QWidget):
             self.closed.emit()
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.cropping:
             self.apply_crop()
+        elif self.comparing and key in (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_Tab):
+            self._step_active(1)
+        elif self.comparing and key in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_Backtab):
+            self._step_active(-1)
+        elif self.showing_video and key == Qt.Key.Key_Space:
+            self.video.toggle_play()
+        elif self.showing_video and key == Qt.Key.Key_M:
+            self.video.toggle_mute()
         elif key == Qt.Key.Key_C and not self.cropping:
             self.start_crop()
         elif self.cropping:

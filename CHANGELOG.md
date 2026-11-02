@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0
+
+- **Compare side by side**: select 2–4 photos and press Shift+P (or right-click → Compare). 2 or 3 sit side by
+  side, 4 make a 2×2 grid. Click a photo (or use ← →) to make it the active one; the sidebar and label hotkeys
+  act on it. Delete removes the active photo. Closing gives the compared photos back as the selection.
+- **Videos play in the big preview**: play/pause (Space), seek bar, time, sound on/off (M) and an Auto-play
+  option that's remembered. Every video starts muted. The video is released before it's moved, renamed,
+  deleted or has its labels changed, so Windows never says the file is in use.
+
 ## 0.7.5
 
 - The Shift+P preview shows the file-type badge, ★/🔖 and the color-label frame, like the grid.

@@ -27,6 +27,8 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Do this | How |
 |---|---|
 | Open a folder | Click it in the **Folders** tree, or type/paste a path in the address bar |
+| Compare side by side | Select 2–4 photos and press **Shift+P** (or right-click → Compare). Click a photo or use ← → to pick the active one; the sidebar and label hotkeys work on it |
+| Play a video | Shift+P on a video. **Space** play/pause, **M** sound on/off (videos always start muted). Tick **Auto-play** to start videos automatically (remembered) |
 | Quick preview (inside the window) | **Shift+P**. ← → to move, **C** to crop, **Shift+P** or **Esc** to close. The sidebar follows the photo you're looking at, and the photo shows its type badge and labels |
 | View big | Double-click or **Enter**. In the viewer: ← → to move, **Delete** to recycle, **Enter** to play a video, **Esc** to close |
 | Select | Click, Ctrl+click, Shift+click, **Ctrl+A** |
