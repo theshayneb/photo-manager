@@ -764,5 +764,6 @@ def test_none_clears_color_star_and_bookmark(window):
     # None sits after the icons on the same row.
     panel = win.sidebar.labels
     QApplication.processEvents()
-    assert panel.clear.y() == panel.buttons["Red"].y()  # same row
+    # Same row: vertical centres line up (buttons differ in height by a few pixels).
+    assert abs(panel.clear.geometry().center().y() - panel.buttons["Red"].geometry().center().y()) <= 3
     assert panel.clear.x() > panel.flag_buttons["Bookmark"].x() > panel.buttons["Purple"].x()

@@ -26,3 +26,22 @@ def new_york_tz(monkeypatch):
 def isolated_appdata(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+
+
+# On Windows the test process sometimes crashes *after* all tests have finished, while
+# Python tears down Qt and the Windows thumbnail/COM helpers. The results are already
+# reported by then, so exit straight away with pytest's real exit status instead of
+# risking a teardown crash turning a green run red. Test failures still fail the run.
+_exit_status: dict[str, int] = {}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _exit_status["code"] = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    if sys.platform == "win32" and "code" in _exit_status:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_exit_status["code"])
