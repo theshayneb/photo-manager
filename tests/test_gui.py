@@ -470,6 +470,9 @@ def test_copy_files_to_clipboard(window):
     # Qt may use forward slashes on Windows; it's the same file.
     assert [os.path.normcase(os.path.normpath(u.toLocalFile())) for u in urls] == [
         os.path.normcase(str(folder / "vacation.jpg"))]
+    # Don't leave a file list on the Windows clipboard when the test process exits.
+    QApplication.clipboard().clear()
+    QApplication.processEvents()
 
 
 def test_collapsible_groups(window):
