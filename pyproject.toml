@@ -1,0 +1,13 @@
+[project]
+name = "photo-manager"
+version = "0.1.0"
+description = "A simple Windows photo browser for fixing dates, adding keywords and color labels."
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.7,<7", "Pillow>=11.2", "pillow-heif>=0.18", "send2trash>=1.8"]
+
+[project.gui-scripts]
+photo-manager = "photo_manager.app:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

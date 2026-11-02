@@ -1,0 +1,142 @@
+"""What we read from each file, and the ExifTool arguments for each kind of edit."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from .dates import to_exif
+from .media import IPTC_EXTS, ext, kind
+
+READ_TAGS = [
+    "-EXIF:DateTimeOriginal",
+    "-EXIF:CreateDate",
+    "-XMP:DateTimeOriginal",
+    "-XMP:DateCreated",
+    "-XMP:CreateDate",
+    "-QuickTime:CreateDate",
+    "-File:FileCreateDate",
+    "-File:FileModifyDate",
+    "-IPTC:Keywords",
+    "-XMP:Subject",
+    "-XMP:Label",
+    "-XMP:Rating",
+    "-Composite:ImageSize",
+]
+
+# Where "date taken" comes from, best source first.
+_DATE_SOURCES = [
+    ("EXIF:DateTimeOriginal", "EXIF"),
+    ("XMP:DateTimeOriginal", "XMP"),
+    ("XMP:DateCreated", "XMP"),
+    ("EXIF:CreateDate", "EXIF"),
+    ("XMP:CreateDate", "XMP"),
+    ("QuickTime:CreateDate", "video"),
+]
+
+LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"]
+
+_EXIF_DATE = re.compile(r"(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?")
+
+
+@dataclass
+class Meta:
+    date_taken: datetime | None = None
+    date_source: str = ""
+    file_created: datetime | None = None
+    file_modified: datetime | None = None
+    keywords: list[str] = field(default_factory=list)
+    label: str = ""
+    rating: int = 0
+    image_size: str = ""
+
+
+def parse_exif_date(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    match = _EXIF_DATE.match(value.strip())
+    if not match:
+        return None
+    try:
+        return datetime(*(int(x or 0) for x in match.groups()))  # type: ignore[misc]
+    except ValueError:  # 0000:00:00 and friends
+        return None
+
+
+def _as_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def parse_meta(data: dict) -> Meta:
+    meta = Meta()
+    for key, source in _DATE_SOURCES:
+        dt = parse_exif_date(data.get(key))
+        if dt:
+            meta.date_taken, meta.date_source = dt, source
+            break
+    meta.file_created = parse_exif_date(data.get("File:FileCreateDate"))
+    meta.file_modified = parse_exif_date(data.get("File:FileModifyDate"))
+    seen: dict[str, None] = {}
+    for kw in _as_list(data.get("XMP:Subject")) + _as_list(data.get("IPTC:Keywords")):
+        kw = kw.strip()
+        if kw and kw.casefold() not in {k.casefold() for k in seen}:
+            seen[kw] = None
+    meta.keywords = list(seen)
+    label = str(data.get("XMP:Label") or "")
+    meta.label = next((name for name in LABELS if name.lower() == label.lower()), label)
+    try:
+        meta.rating = int(data.get("XMP:Rating") or 0)
+    except (TypeError, ValueError):
+        meta.rating = 0
+    meta.image_size = str(data.get("Composite:ImageSize") or "").replace(" ", "x")
+    return meta
+
+
+# --------------------------------------------------------------------------
+# Write arguments
+# --------------------------------------------------------------------------
+
+def date_args(path: str, dt: datetime, set_file_dates: bool) -> list[str]:
+    """Arguments that set "date taken" (and optionally Windows file dates)."""
+    value = to_exif(dt)
+    args: list[str] = []
+    if kind(path) == "video":
+        # QuickTime stores UTC; QuickTimeUTC=1 (common args) converts local -> UTC.
+        for tag in ("CreateDate", "ModifyDate", "TrackCreateDate", "TrackModifyDate",
+                    "MediaCreateDate", "MediaModifyDate"):
+            args.append(f"-QuickTime:{tag}={value}")
+    else:
+        # AllDates = DateTimeOriginal, CreateDate, ModifyDate. ExifTool puts them
+        # in EXIF, or in XMP for formats without EXIF (GIF).
+        args.append(f"-AllDates={value}")
+    if set_file_dates:
+        args += [f"-FileCreateDate={value}", f"-FileModifyDate={value}"]
+    else:
+        args.append("-P")
+    return args
+
+
+def keyword_args(path: str, add: list[str] = (), remove: list[str] = ()) -> list[str]:  # type: ignore[assignment]
+    """Add/remove keywords without creating duplicates (XMP, plus IPTC for JPEG/TIFF)."""
+    tags = ["XMP-dc:Subject"]
+    if ext(path) in IPTC_EXTS:
+        tags.append("IPTC:Keywords")
+    args = ["-P"]
+    for tag in tags:
+        for kw in remove:
+            args.append(f"-{tag}-={kw}")
+        for kw in add:
+            # "-=" then "+=" is ExifTool's idiom for "add if not already there".
+            args += [f"-{tag}-={kw}", f"-{tag}+={kw}"]
+    if "IPTC:Keywords" in tags and (add or remove):
+        args.append("-IPTC:CodedCharacterSet=UTF8")
+    return args
+
+
+def label_args(label: str) -> list[str]:
+    return ["-P", f"-XMP-xmp:Label={label}"]

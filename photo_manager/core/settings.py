@@ -1,0 +1,89 @@
+"""User settings, saved as JSON in %APPDATA%\\PhotoManager\\settings.json."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from .dates import DEFAULT_DISPLAY_FORMAT
+from .templates import DEFAULT_TEMPLATES, FilenameTemplate
+
+APP_NAME = "PhotoManager"
+
+
+def config_dir() -> Path:
+    base = os.environ.get("APPDATA") or os.path.join(Path.home(), ".config")
+    return Path(base) / APP_NAME
+
+
+def cache_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.path.join(Path.home(), ".cache")
+    return Path(base) / APP_NAME
+
+
+def _default_keyword_sets() -> dict[str, list[str]]:
+    return {
+        "Shayne": [
+            "me", "josh", "new york", "queens", "rego park", "manhattan",
+            "brooklyn", "concert", "broadway", "museum", "screenshots",
+        ],
+    }
+
+
+@dataclass
+class Settings:
+    last_folder: str = ""
+    display_format: str = DEFAULT_DISPLAY_FORMAT
+    set_file_dates: bool = True
+    rename_pattern: str = "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"
+    confirm_delete: bool = True
+    thumb_size: int = 160
+    sort_by: str = "name"
+    exiftool_path: str = ""
+    keyword_sets: dict[str, list[str]] = field(default_factory=_default_keyword_sets)
+    current_keyword_set: str = "Shayne"
+    templates: list[FilenameTemplate] = field(
+        default_factory=lambda: [FilenameTemplate(**t.to_dict()) for t in DEFAULT_TEMPLATES]
+    )
+    recent_move_folders: list[str] = field(default_factory=list)
+    window_geometry: str = ""
+    window_state: str = ""
+
+    path: Path = field(default_factory=lambda: config_dir() / "settings.json", repr=False)
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "Settings":
+        settings = cls()
+        if path:
+            settings.path = path
+        try:
+            data = json.loads(settings.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return settings
+        for key, value in data.items():
+            if key == "path" or not hasattr(settings, key):
+                continue
+            if key == "templates":
+                value = [FilenameTemplate.from_dict(t) for t in value if isinstance(t, dict)]
+            default = getattr(settings, key)
+            if type(default) is type(value) or key == "templates":
+                setattr(settings, key, value)
+        if not settings.keyword_sets:
+            settings.keyword_sets = {"Keywords": []}
+        if settings.current_keyword_set not in settings.keyword_sets:
+            settings.current_keyword_set = next(iter(settings.keyword_sets))
+        return settings
+
+    def save(self) -> None:
+        data = asdict(self)
+        data.pop("path", None)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def remember_move_folder(self, folder: str) -> None:
+        folders = [f for f in self.recent_move_folders if os.path.normcase(f) != os.path.normcase(folder)]
+        self.recent_move_folders = [folder, *folders][:12]

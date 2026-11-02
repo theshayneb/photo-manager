@@ -1,0 +1,62 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Get ExifTool
+        shell: pwsh
+        run: ./scripts/get-exiftool.ps1
+
+      - name: Tests (including real ExifTool round trips)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -v
+
+      - name: Build exe
+        shell: pwsh
+        run: ./scripts/build.ps1
+
+      - name: Self-test the built exe
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "selftest.json"
+          Start-Process -FilePath dist\PhotoManager\PhotoManager.exe -ArgumentList "--self-test", "`"$out`"" -Wait
+          Get-Content $out
+          $r = Get-Content $out | ConvertFrom-Json
+          if (-not $r.ok) { throw "self-test failed" }
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\PhotoManager -DestinationPath PhotoManager-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotoManager-windows
+          path: PhotoManager-windows.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PhotoManager-windows.zip
+          generate_release_notes: true
