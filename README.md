@@ -106,4 +106,5 @@ powershell -File scripts\build.ps1
 ```
 
 Every push to `main` builds the Windows exe in GitHub Actions (tests run there against the real ExifTool).
-Pushing a tag such as `0.2.0` publishes a release with the zip.
+To publish a release, bump `__version__` in `photo_manager/__init__.py` (and `pyproject.toml`) and push to `main`:
+the build creates the matching tag and release with the zip if that version has none yet.
