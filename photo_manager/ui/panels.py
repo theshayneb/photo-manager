@@ -370,8 +370,13 @@ class RenamePanel(QWidget):
         self.source.currentIndexChanged.connect(self._source_changed)
         layout.addWidget(self.source)
         layout.addWidget(QLabel("New name:"))
-        self.pattern = QLineEdit(ctl.settings.rename_pattern)
-        self.pattern.textChanged.connect(self._changed)
+        self.pattern = QComboBox()
+        self.pattern.setEditable(True)
+        self.pattern.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.pattern.setToolTip("Pick a saved pattern or type your own. Patterns you use are added to this list.")
+        self.pattern.addItems(ctl.settings.rename_presets)
+        self.pattern.setCurrentText(ctl.settings.rename_pattern)
+        self.pattern.editTextChanged.connect(self._changed)
         layout.addWidget(self.pattern)
         layout.addWidget(_hint("{YYYY} {YY} {MM} {DD} {HH} {mm} {ss} · {hh} {AMPM} for 12-hour · "
                                "{name} = current name"))
@@ -390,7 +395,7 @@ class RenamePanel(QWidget):
         self.refresh(self.items)
 
     def _names(self) -> dict[str, str]:
-        pattern = self.pattern.text().strip()
+        pattern = self.pattern.currentText().strip()
         if not pattern:
             return {}
         source = self.source.currentData()
@@ -421,6 +426,10 @@ class RenamePanel(QWidget):
         from ..core.fileops import plan_renames
 
         plan = plan_renames(self._names())
+        pattern = self.pattern.currentText().strip()
+        if pattern and pattern not in self.ctl.settings.rename_presets:
+            self.ctl.settings.rename_presets.append(pattern)
+            self.pattern.addItem(pattern)
         if plan:
             self.ctl.rename_files(plan)
 

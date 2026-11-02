@@ -64,13 +64,14 @@ class TemplateDialog(QDialog):
         self.sample.textChanged.connect(lambda _t: self._test())
         row.addWidget(self.sample, 1)
         layout.addLayout(row)
-        self.result = QLabel()
-        layout.addWidget(self.result)
+        self.result_label = QLabel()
+        layout.addWidget(self.result_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._ready = True
         self._test()
 
     def _add_row(self, template: FilenameTemplate) -> None:
@@ -129,18 +130,18 @@ class TemplateDialog(QDialog):
         return errors
 
     def _test(self) -> None:
-        if not hasattr(self, "result"):
+        if not getattr(self, "_ready", False):  # still building the dialog
             return
         errors = self._errors()
         if errors:
-            self.result.setText("<span style='color:#e5484d'>" + "<br>".join(errors) + "</span>")
+            self.result_label.setText("<span style='color:#e5484d'>" + "<br>".join(errors) + "</span>")
             return
         found = match_any(self.templates(), self.sample.text().strip())
         if found:
-            self.result.setText(f"✓ <b>{dates.format_display(found[1], self.display_format)}</b>"
+            self.result_label.setText(f"✓ <b>{dates.format_display(found[1], self.display_format)}</b>"
                                 f" — matched “{found[0].name}”")
         else:
-            self.result.setText("No template matches this filename.")
+            self.result_label.setText("No template matches this filename.")
 
     def _accept(self) -> None:
         if not self._errors():
@@ -291,3 +292,44 @@ class KeywordSetDialog(QDialog):
             self.error.setText("<span style='color:#e5484d'>Another set already has that name.</span>")
         else:
             self.accept()
+
+
+class RenameDialog(QDialog):
+    """Rename one file. The name (without extension) starts selected, like Explorer."""
+
+    def __init__(self, path: str, parent: QWidget | None = None):
+        from ..core.fileops import check_new_name
+
+        super().__init__(parent)
+        self.path = path
+        self._check = check_new_name
+        self.setWindowTitle("Rename")
+        self.setMinimumWidth(460)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("New name:"))
+        name = os.path.basename(path)
+        self.edit = QLineEdit(name)
+        stem = os.path.splitext(name)[0]
+        self.edit.setSelection(0, len(stem))
+        self.edit.textChanged.connect(lambda _t: self.error.setText(""))
+        layout.addWidget(self.edit)
+        self.error = QLabel()
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def new_name(self) -> str:
+        return self.edit.text().strip()
+
+    def _accept(self) -> None:
+        problem = self._check(self.path, self.new_name())
+        if problem:
+            self.error.setText(f"<span style='color:#e5484d'>{problem}</span>")
+            return
+        if os.path.splitext(self.new_name())[1].lower() != os.path.splitext(self.path)[1].lower():
+            self.error.setText("<span style='color:#e5484d'>Keep the same extension "
+                               f"({os.path.splitext(self.path)[1]}) so the file still opens.</span>")
+            return
+        self.accept()

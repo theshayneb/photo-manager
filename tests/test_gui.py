@@ -230,7 +230,7 @@ def test_rename_with_exif_create_date_and_name_token(window):
     select(win, "vacation.jpg")
     panel = win.sidebar.rename
     panel.source.setCurrentIndex(panel.source.findData("created"))
-    panel.pattern.setText("{YYYY}-{MM}-{DD} {name}")
+    panel.pattern.setCurrentText("{YYYY}-{MM}-{DD} {name}")
     assert "2025-01-02 vacation.jpg" in panel.example.text()
     panel.apply()
     settle(win)
@@ -379,3 +379,113 @@ def test_aspect_ratio_crop_box(qapp):
     box = canvas._constrain(QPointF(3500, 2500), QPointF(4900, 3900))
     assert box.right() <= 4000 and box.bottom() <= 3000
     assert round(box.width()) == round(box.height())
+
+
+def test_template_dialog_opens_for_real(qapp):
+    """Regression: the Edit… button crashed while building this dialog."""
+    from photo_manager.core.settings import Settings
+    from photo_manager.ui.dialogs import TemplateDialog
+
+    dlg = TemplateDialog(Settings().templates, "%m-%d-%Y %I:%M:%S %p")
+    assert dlg.table.rowCount() == len(Settings().templates)
+    dlg.sample.setText("20261024084049_1.jpg")
+    assert "10-24-2026 08:40:49 AM" in dlg.result_label.text()
+    assert "Digits only" in dlg.result_label.text()
+
+
+def test_digits_only_template_added_for_existing_users(tmp_path):
+    import json
+
+    from photo_manager.core.settings import Settings
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"templates": [
+        {"name": "Mine", "pattern": "DSC_{YYYY}{MM}{DD}", "utc": False},
+        {"name": "Catch-all", "pattern": "*{YYYY}{MM}{DD}?{HH}{mm}{ss}", "utc": False},
+    ]}))
+    s = Settings.load(path)
+    patterns = [t.pattern for t in s.templates]
+    assert "{YYYY}{MM}{DD}{HH}{mm}{ss}" in patterns
+    assert patterns.index("{YYYY}{MM}{DD}{HH}{mm}{ss}") < patterns.index("*{YYYY}{MM}{DD}?{HH}{mm}{ss}")
+    s.save()
+    # Deleting it later sticks: it isn't re-added on the next load.
+    s.templates = [t for t in s.templates if t.pattern != "{YYYY}{MM}{DD}{HH}{mm}{ss}"]
+    s.save()
+    assert "{YYYY}{MM}{DD}{HH}{mm}{ss}" not in [t.pattern for t in Settings.load(path).templates]
+
+
+def test_rename_presets_include_digits_only(window):
+    win, folder, et = window
+    panel = win.sidebar.rename
+    presets = [panel.pattern.itemText(i) for i in range(panel.pattern.count())]
+    assert "{YYYY}{MM}{DD}{HH}{mm}{ss}" in presets
+    for name in ("vacation.jpg", "IMG_20261023_000100_358_3.jpg"):
+        et.write(str(folder / name), ["-AllDates=2026:10:24 08:40:49"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg", "IMG_20261023_000100_358_3.jpg")
+    panel.pattern.setCurrentText("{YYYY}{MM}{DD}{HH}{mm}{ss}")
+    panel.apply()
+    settle(win)
+    # Two photos from the same second: the second one gets _1.
+    assert (folder / "20261024084049.jpg").exists() and (folder / "20261024084049_1.jpg").exists()
+
+
+def test_manual_rename(window, monkeypatch):
+    win, folder, _ = window
+    from photo_manager.core.fileops import check_new_name
+    from photo_manager.ui import main_window
+    from photo_manager.ui.dialogs import RenameDialog
+
+    path = str(folder / "vacation.jpg")
+    dlg = RenameDialog(path)
+    assert dlg.edit.selectedText() == "vacation"
+    assert check_new_name(path, "a:b.jpg").startswith("A file name can't contain")
+    assert "already exists" in check_new_name(path, "Screenshot_20261023-143414.png")
+    assert check_new_name(path, "Vacation.jpg") is None  # changing only the case is fine
+
+    class FakeRename:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return True
+
+        def new_name(self):
+            return "beach day.jpg"
+
+    monkeypatch.setattr(main_window, "RenameDialog", FakeRename)
+    win.grid.select_paths([path], current=path)
+    win.rename_current()
+    settle(win)
+    assert (folder / "beach day.jpg").exists()
+    assert win.grid.selected_paths() == [str(folder / "beach day.jpg")]
+
+
+def test_copy_files_to_clipboard(window):
+    win, folder, _ = window
+    select(win, "vacation.jpg")
+    win.copy_files()
+    urls = QApplication.clipboard().mimeData().urls()
+    assert [u.toLocalFile() for u in urls] == [str(folder / "vacation.jpg")]
+
+
+def test_collapsible_groups(window):
+    win, folder, et = window
+    select(win, "vacation.jpg")
+    win._label_shortcut("Red")
+    settle(win)
+    win.set_group("label")
+    red = str(folder / "vacation.jpg")
+    win.grid.toggle_group("Red")
+    assert win.grid.isRowHidden(win.model.row_of(red))
+    assert red not in win.grid.selected_paths()  # hidden photos are deselected
+    win.grid.selectAll()
+    assert red not in win.grid.selected_paths()  # Ctrl+A skips collapsed groups
+    others = [i for i in win.model.items if i.path != red]
+    assert win.model.neighbour(others[0].path, 1) is others[1]
+    # Survives regrouping (e.g. after metadata loads).
+    win.regroup()
+    assert win.grid.isRowHidden(win.model.row_of(red))
+    win.grid.set_all_groups(False)
+    assert not win.grid.isRowHidden(win.model.row_of(red))

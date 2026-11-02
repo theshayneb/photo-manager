@@ -71,6 +71,7 @@ class Item:
 class GroupHeader:
     title: str
     paths: list[str]
+    collapsed: bool = False
 
 
 def pil_to_qimage(im: Image.Image) -> QImage:
@@ -149,6 +150,7 @@ class PhotoModel(QAbstractListModel):
         self.sort_by = "name"
         self.group_by = "none"
         self.week_start = "sunday"
+        self.collapsed: set[str] = set()  # titles of collapsed groups
         self.cache_dir = cache_dir
         self._row_of: dict[str, int] = {}
         self._pool = QThreadPool(self)
@@ -194,12 +196,16 @@ class PhotoModel(QAbstractListModel):
             ordered: list[Item] = []
             for key in sorted(groups):
                 title, members = groups[key]
-                rows.append(GroupHeader(title, [m.path for m in members]))
+                rows.append(GroupHeader(title, [m.path for m in members], title in self.collapsed))
+                for m in members:
+                    m.extra["group"] = title
                 rows.extend(members)
                 ordered.extend(members)
             self.items = ordered
         else:
             rows = list(self.items)
+            for item in self.items:
+                item.extra.pop("group", None)
         self.rows = rows
         self._row_of = {os.path.normcase(r.path): n for n, r in enumerate(rows) if isinstance(r, Item)}
         self.endResetModel()
@@ -275,18 +281,40 @@ class PhotoModel(QAbstractListModel):
             return r if isinstance(r, GroupHeader) else None
         return None
 
+    def is_hidden(self, item: Item) -> bool:
+        """True when the item is inside a collapsed group."""
+        return self.grouped and item.extra.get("group") in self.collapsed
+
+    def visible_items(self) -> list[Item]:
+        return [i for i in self.items if not self.is_hidden(i)]
+
     def first_item_row(self) -> int:
-        return self.row_of(self.items[0].path) if self.items else -1
+        visible = self.visible_items()
+        return self.row_of(visible[0].path) if visible else -1
 
     def neighbour(self, path: str, delta: int) -> Item | None:
-        """The photo delta steps away in display order (skipping headers)."""
-        keys = [os.path.normcase(i.path) for i in self.items]
+        """The photo delta steps away in display order (skipping headers and collapsed groups)."""
+        items = self.visible_items()
+        keys = [os.path.normcase(i.path) for i in items]
         try:
             pos = keys.index(os.path.normcase(path))
         except ValueError:
             return None
         target = pos + delta
-        return self.items[target] if 0 <= target < len(self.items) else None
+        return items[target] if 0 <= target < len(items) else None
+
+    def set_collapsed(self, title: str, collapsed: bool) -> None:
+        if collapsed:
+            self.collapsed.add(title)
+        else:
+            self.collapsed.discard(title)
+        for row, r in enumerate(self.rows):
+            if isinstance(r, GroupHeader) and r.title == title:
+                r.collapsed = collapsed
+                self._changed(row)
+
+    def group_titles(self) -> list[str]:
+        return [r.title for r in self.rows if isinstance(r, GroupHeader)]
 
     # -- updates -----------------------------------------------------------
 
@@ -487,7 +515,7 @@ class ThumbDelegate(QStyledItemDelegate):
         font.setPointSizeF(option.font.pointSizeF() + 1)
         painter.setFont(font)
         painter.setPen(text_color)
-        title = header.title
+        title = ("▸  " if header.collapsed else "▾  ") + header.title
         count = f"  ·  {len(header.paths)}"
         painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
         width = painter.fontMetrics().horizontalAdvance(title)
@@ -520,6 +548,39 @@ class ThumbGrid(QListView):
         # Smooth scrolling: the default (a whole row per wheel step) jumps too far.
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._update_scroll_step()
+        model.modelReset.connect(self.apply_hidden)
+
+    def apply_hidden(self) -> None:
+        """Hide the photos of collapsed groups."""
+        model = self.photo_model()
+        sel = self.selectionModel()
+        for row, r in enumerate(model.rows):
+            hidden = isinstance(r, Item) and model.is_hidden(r)
+            if self.isRowHidden(row) != hidden:
+                self.setRowHidden(row, hidden)
+            if hidden and sel.isRowSelected(row):
+                sel.select(model.index(row), sel.SelectionFlag.Deselect)
+        current = model.item_at(self.currentIndex().row())
+        if current and model.is_hidden(current):
+            sel.setCurrentIndex(model.index(-1), sel.SelectionFlag.NoUpdate)
+
+    def toggle_group(self, title: str) -> None:
+        model = self.photo_model()
+        model.set_collapsed(title, title not in model.collapsed)
+        self.apply_hidden()
+        self.relayout()
+
+    def set_all_groups(self, collapsed: bool) -> None:
+        model = self.photo_model()
+        for title in model.group_titles():
+            model.set_collapsed(title, collapsed)
+        self.apply_hidden()
+        self.relayout()
+
+    def selectAll(self) -> None:
+        """Ctrl+A selects only what you can see (not photos in collapsed groups)."""
+        self.select_paths([i.path for i in self.photo_model().visible_items()],
+                          current=self.current_path())
 
     def updateGeometries(self) -> None:
         super().updateGeometries()  # Qt resets the step here; put ours back
@@ -551,8 +612,13 @@ class ThumbGrid(QListView):
         index = self.indexAt(event.position().toPoint())
         header = self.photo_model().header_at(index.row()) if index.isValid() else None
         if header is not None and event.button() == Qt.MouseButton.LeftButton:
-            self.select_paths(header.paths, add=bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier))
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.select_paths(header.paths, add=True)  # Ctrl+click: select the group
+            else:
+                self.toggle_group(header.title)  # click: collapse / expand
             return
+        if header is not None:
+            return  # right-click on a header: handled by the context menu
         super().mousePressEvent(event)
 
     def select_paths(self, paths: list[str], add: bool = False, current: str | None = None) -> None:
@@ -563,10 +629,12 @@ class ThumbGrid(QListView):
         first = None
         for path in paths:
             row = model.row_of(path)
-            if row >= 0:
+            if row >= 0 and not self.isRowHidden(row):
                 sel.select(model.index(row), sel.SelectionFlag.Select)
                 first = first if first is not None else row
         target = model.row_of(current) if current else first
+        if target is not None and target >= 0 and self.isRowHidden(target):
+            target = first
         if target is not None and target >= 0:
             sel.setCurrentIndex(model.index(target), sel.SelectionFlag.NoUpdate)
 

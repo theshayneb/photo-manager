@@ -55,6 +55,25 @@ def move(paths: list[str], folder: str) -> tuple[dict[str, str], list[tuple[str,
     return moved, failures
 
 
+INVALID_NAME_CHARS = set('<>:"/\\|?*')
+
+
+def check_new_name(path: str, new_name: str) -> str | None:
+    """Problem with renaming path to new_name (in the same folder), or None if fine."""
+    name = new_name.strip()
+    if not name or name in (".", ".."):
+        return "Please type a name."
+    bad = sorted({c for c in name if c in INVALID_NAME_CHARS or ord(c) < 32})
+    if bad:
+        return "A file name can't contain " + " ".join(bad)
+    if name.endswith((".", " ")):
+        return "A file name can't end with a dot or a space."
+    target = Path(path).with_name(name)
+    if target.exists() and os.path.normcase(str(target)) != os.path.normcase(path):
+        return f"“{name}” already exists in this folder."
+    return None
+
+
 def plan_renames(new_names: dict[str, str]) -> dict[str, str]:
     """Turn {path: new base name (no extension)} into {path: unique new path}."""
     plan: dict[str, str] = {}
@@ -75,7 +94,8 @@ def rename(plan: dict[str, str]) -> tuple[dict[str, str], list[tuple[str, str]]]
     failures = []
     for src, dest in plan.items():
         try:
-            if Path(dest).exists():
+            same_file = os.path.normcase(src) == os.path.normcase(dest)  # e.g. only the case changes
+            if Path(dest).exists() and not same_file:
                 raise FileExistsError(f"{dest} already exists")
             os.rename(src, dest)
             done[src] = dest

@@ -52,6 +52,40 @@ def self_test(out_path: str) -> int:
     return 0 if result["ok"] else 1
 
 
+def install_error_handler() -> None:
+    """Show unexpected errors instead of failing silently (the exe has no console)."""
+    import traceback
+    from datetime import datetime
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from .core.settings import cache_dir
+
+    log = cache_dir() / "errors.log"
+    showing = False
+
+    def hook(exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        nonlocal showing
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S} (v{__version__})\n{text}\n")
+        except OSError:
+            pass
+        sys.__excepthook__(exc_type, exc, tb)
+        if showing or QApplication.instance() is None:
+            return
+        showing = True
+        try:
+            QMessageBox.warning(None, "Photo Manager — something went wrong",
+                                f"{exc_type.__name__}: {exc}\n\nDetails were saved to:\n{log}")
+        finally:
+            showing = False
+
+    sys.excepthook = hook
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv)
     app = QApplication(argv)
@@ -60,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("Photo Manager")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("PhotoManager")
+    install_error_handler()
     settings = Settings.load()
     apply_theme(settings.theme, app)
     window = MainWindow(settings, start_exiftool(settings))

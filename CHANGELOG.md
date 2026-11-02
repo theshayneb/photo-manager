@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Fixed: the **Edit…** button for filename templates did nothing (the dialog crashed while opening).
+- Unexpected errors now show a message and are logged to `%LOCALAPPDATA%\PhotoManager\errors.log`.
+- Right-click menu on photos: Preview, View, Open, Open with…, Rename… (F2), Crop…, Color label, Copy (Ctrl+C),
+  Copy path, Move to…, Show in Explorer, Properties, Delete.
+- Group headers collapse/expand on click (Ctrl+click selects the group; right-click for Collapse/Expand all).
+- New filename template and rename preset for digits-only names like `20261024084049_1`.
+- Rename patterns are a dropdown of saved presets; patterns you use are remembered.
+
 ## 0.3.0
 
 - **Shift+P** preview inside the window (← → to move, Esc/Shift+P to close); the sidebar follows the photo.

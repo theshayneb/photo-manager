@@ -7,22 +7,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QDir, QModelIndex, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QDir, QMimeData, QModelIndex, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction, QActionGroup, QCloseEvent, QDesktopServices, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
     QSlider, QSplitter, QStackedWidget, QToolBar, QTreeView, QVBoxLayout, QWidget,
 )
 
 from ..core import dates, fileops
-from ..core.crop import save_crop
+from ..core.crop import can_crop, save_crop
+from ..core.winshell import open_with, show_properties
 from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
-from .dialogs import MoveDialog, TemplateDialog
+from .dialogs import MoveDialog, RenameDialog, TemplateDialog
 from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
 from .panels import PANELS, Sidebar
 from .theme import THEMES, apply_theme
@@ -72,6 +73,8 @@ class MainWindow(QMainWindow):
         self.grid.set_info_fields(settings.thumb_info)
         self.grid.selectionModel().selectionChanged.connect(lambda *_: self._schedule_refresh())
         self.grid.activated.connect(lambda _idx: self.open_viewer())
+        self.grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.grid.customContextMenuRequested.connect(self._grid_menu)
         self.preview = PreviewPane(settings)
         self.preview.closed.connect(self.close_preview)
         self.preview.navigate.connect(self._preview_step)
@@ -306,6 +309,10 @@ class MainWindow(QMainWindow):
             sc.activated.connect(lambda name=label: self._label_shortcut(name))
         clear = QShortcut(QKeySequence("Ctrl+0"), self)
         clear.activated.connect(lambda: self._label_shortcut(""))
+        for keys, slot in (("F2", self.rename_current), ("Ctrl+C", self.copy_files)):
+            sc = QShortcut(QKeySequence(keys), self.grid)
+            sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+            sc.activated.connect(slot)
         preview = QShortcut(QKeySequence("Shift+P"), self.grid)
         preview.setContext(Qt.ShortcutContext.WidgetShortcut)
         preview.activated.connect(self.open_preview)
@@ -695,6 +702,104 @@ class MainWindow(QMainWindow):
         if path:
             self.grid.select_paths([path], current=path)
             self.delete_selected()
+
+    # --------------------------------------------------------- right-click
+
+    def _grid_menu(self, pos) -> None:  # type: ignore[no-untyped-def]
+        index = self.grid.indexAt(pos)
+        if not index.isValid():
+            return
+        header = self.model.header_at(index.row())
+        menu = QMenu(self)
+        if header is not None:
+            menu.addAction("Expand group" if header.collapsed else "Collapse group",
+                           lambda: self.grid.toggle_group(header.title))
+            menu.addAction("Select the photos in this group", lambda: self.select_group(header))
+            menu.addSeparator()
+            menu.addAction("Collapse all groups", lambda: self.grid.set_all_groups(True))
+            menu.addAction("Expand all groups", lambda: self.grid.set_all_groups(False))
+            menu.exec(self.grid.viewport().mapToGlobal(pos))
+            return
+        item = self.model.item_at(index.row())
+        if item is None:
+            return
+        if item.path not in self.grid.selected_paths():
+            self.grid.select_paths([item.path], current=item.path)
+        else:
+            self.grid.selectionModel().setCurrentIndex(index, self.grid.selectionModel().SelectionFlag.NoUpdate)
+        self.refresh_sidebar()
+        paths = self.grid.selected_paths()
+        single = len(paths) == 1
+        windows = sys.platform == "win32"
+
+        def add(text: str, slot, shortcut: str = "", enabled: bool = True) -> None:  # type: ignore[no-untyped-def]
+            action = menu.addAction(text, slot)
+            if shortcut:
+                action.setShortcut(QKeySequence(shortcut))
+                action.setShortcutVisibleInContextMenu(True)
+            action.setEnabled(enabled)
+
+        add("Preview", self.open_preview, "Shift+P")
+        add("View", self.open_viewer, "Return")
+        add("Open", self.open_external_selected, "Ctrl+O")
+        if windows:
+            add("Open with…", lambda: open_with(item.path))
+        menu.addSeparator()
+        add("Rename…", self.rename_current, "F2", single)
+        add("Crop…", self.crop_current, "", single and item.kind == "image" and can_crop(item.path))
+        labels = menu.addMenu("Color label")
+        for n, label in enumerate(LABELS, start=1):
+            action = labels.addAction(label, lambda name=label: self._label_shortcut(name))
+            action.setShortcut(QKeySequence(f"Ctrl+{n}"))
+            action.setShortcutVisibleInContextMenu(True)
+        labels.addAction("None", lambda: self._label_shortcut(""))
+        labels.setEnabled(self.exiftool_ok)
+        menu.addSeparator()
+        add("Copy", self.copy_files, "Ctrl+C")
+        add("Copy path" if single else f"Copy {len(paths)} paths", self.copy_paths)
+        add("Move to…", self.move_selected, "Ctrl+M")
+        add("Show in Explorer", self.show_in_explorer, "Ctrl+E")
+        if windows:
+            add("Properties", lambda: show_properties(item.path), "", single)
+        menu.addSeparator()
+        add("Delete (to Recycle Bin)", self.delete_selected, "Delete")
+        menu.exec(self.grid.viewport().mapToGlobal(pos))
+
+    def select_group(self, header) -> None:  # type: ignore[no-untyped-def]
+        if header.collapsed:
+            self.grid.toggle_group(header.title)
+        self.grid.select_paths(header.paths)
+
+    def rename_current(self) -> None:
+        paths = self.grid.selected_paths()
+        path = self.grid.current_path() if len(paths) != 1 else paths[0]
+        if not path:
+            return
+        dlg = RenameDialog(path, self)
+        if not dlg.exec():
+            return
+        new_path = os.path.join(os.path.dirname(path), dlg.new_name())
+        if new_path != path:
+            self.rename_files({path: new_path})
+
+    def copy_files(self) -> None:
+        paths = self.grid.selected_paths()
+        if not paths:
+            return
+        data = QMimeData()
+        data.setUrls([QUrl.fromLocalFile(p) for p in paths])
+        data.setText("\n".join(os.path.normpath(p) for p in paths))
+        QApplication.clipboard().setMimeData(data)
+        self.status.setText(f"Copied {len(paths)} file(s) — paste them in Explorer.")
+
+    def copy_paths(self) -> None:
+        paths = self.grid.selected_paths()
+        QApplication.clipboard().setText("\n".join(os.path.normpath(p) for p in paths))
+
+    def crop_current(self) -> None:
+        self.open_preview()
+        if self.previewing:
+            self.preview.start_crop()
 
     # ------------------------------------------------------- preview / crop
 

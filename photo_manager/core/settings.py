@@ -32,6 +32,14 @@ def _default_keyword_sets() -> dict[str, list[str]]:
     }
 
 
+DEFAULT_RENAME_PRESETS = [
+    "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}",
+    "{YYYY}{MM}{DD}{HH}{mm}{ss}",
+    "{YYYY}-{MM}-{DD} {name}",
+    "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}",
+]
+
+
 @dataclass
 class Settings:
     last_folder: str = ""
@@ -47,6 +55,8 @@ class Settings:
     templates: list[FilenameTemplate] = field(
         default_factory=lambda: [FilenameTemplate(**t.to_dict()) for t in DEFAULT_TEMPLATES]
     )
+    known_default_templates: list[str] = field(default_factory=list)
+    rename_presets: list[str] = field(default_factory=lambda: list(DEFAULT_RENAME_PRESETS))
     recent_move_folders: list[str] = field(default_factory=list)
     favorites: list[str] = field(default_factory=list)
     rename_source: str = "taken"  # taken | created | file_created | file_modified
@@ -79,11 +89,21 @@ class Settings:
             default = getattr(settings, key)
             if type(default) is type(value) or key == "templates":
                 setattr(settings, key, value)
+        settings._add_new_default_templates()
         if not settings.keyword_sets:
             settings.keyword_sets = {"Keywords": []}
         if settings.current_keyword_set not in settings.keyword_sets:
             settings.current_keyword_set = next(iter(settings.keyword_sets))
         return settings
+
+    def _add_new_default_templates(self) -> None:
+        """Give existing users templates added in newer versions (once each)."""
+        known = set(self.known_default_templates)
+        have = {t.pattern for t in self.templates}
+        for index, template in enumerate(DEFAULT_TEMPLATES):
+            if template.pattern not in known and template.pattern not in have:
+                self.templates.insert(min(index, len(self.templates)), FilenameTemplate(**template.to_dict()))
+        self.known_default_templates = [t.pattern for t in DEFAULT_TEMPLATES]
 
     def save(self) -> None:
         data = asdict(self)

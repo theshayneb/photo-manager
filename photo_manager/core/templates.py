@@ -143,5 +143,6 @@ DEFAULT_TEMPLATES = [
     FilenameTemplate("Phone video (VID_)", "VID_{YYYY}{MM}{DD}_{HH}{mm}{ss}"),
     FilenameTemplate("Screenshot", "Screenshot_{YYYY}{MM}{DD}-{HH}{mm}{ss}"),
     FilenameTemplate("Already renamed", "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"),
+    FilenameTemplate("Digits only (YYYYMMDDHHMMSS)", "{YYYY}{MM}{DD}{HH}{mm}{ss}"),
     FilenameTemplate("Anything with YYYYMMDD_HHMMSS", "*{YYYY}{MM}{DD}?{HH}{mm}{ss}"),
 ]

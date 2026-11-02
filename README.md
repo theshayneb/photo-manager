@@ -31,6 +31,7 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | View big | Double-click or **Enter**. In the viewer: ← → to move, **Delete** to recycle, **Enter** to play a video, **Esc** to close |
 | Select | Click, Ctrl+click, Shift+click, **Ctrl+A** |
 | Delete | **Delete** key (goes to the Recycle Bin) |
+| Right-click menu | Preview, View, Open, Open with…, **Rename… (F2)**, Crop…, Color label, Copy (**Ctrl+C**, paste in Explorer), Copy path, Move to…, Show in Explorer, Properties, Delete |
 | Move | **Ctrl+M**, then press **1–9** for a recent folder or **Browse…** |
 | Color label | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** none. Pressing the same label again removes it |
 | Show in Explorer / open in default app | **Ctrl+E** / **Ctrl+O** |
@@ -44,7 +45,8 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 - **Show under thumbnails**: Date taken (on by default), dimensions, file size, keywords.
 - **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday,
   and show their week number (Sunday weeks: week 1 contains Jan 1; Monday weeks: ISO week numbers).
-  Click a group's header to select everything in it (Ctrl+click adds to the selection).
+  **Click a group's header to collapse or expand it**; Ctrl+click selects everything in it. Right-click a header
+  for Collapse all / Expand all. Ctrl+A and arrow keys skip collapsed groups.
 - **Theme**: Dark (default), Light, or follow Windows.
 
 ### Keywords
@@ -85,6 +87,7 @@ Built-in templates:
 | `VID_{YYYY}{MM}{DD}_{HH}{mm}{ss}` | `VID_20261023_120000.mp4` | |
 | `Screenshot_{YYYY}{MM}{DD}-{HH}{mm}{ss}` | `Screenshot_20261023-143414.png` | |
 | `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` | `2026-10-23_14-34-14.jpg` | Files already renamed by this app |
+| `{YYYY}{MM}{DD}{HH}{mm}{ss}` | `20261024084049_1.jpg` | Digits only |
 | `*{YYYY}{MM}{DD}?{HH}{mm}{ss}` | `anything 20261023-143414.jpg` | Catch-all |
 
 **Edit…** opens the template editor, with a box to test a filename. Placeholders: `{YYYY}` `{YY}` `{MM}` `{DD}` `{HH}` (00–23)
@@ -96,7 +99,12 @@ Built-in templates:
 Choose which date to use: **Date taken** (EXIF DateTimeOriginal), **EXIF Create Date**, or the Windows
 Created/Modified date. The pattern uses the same placeholders plus `{name}` (the current name), e.g.
 `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` → `2026-10-23_14-34-14.jpg`.
-Name clashes get `_1`, `_2`…; nothing is ever overwritten.
+Pick a saved pattern from the list or type your own (patterns you use are added to the list). Built in:
+`{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}`, `{YYYY}{MM}{DD}{HH}{mm}{ss}` (e.g. `20261024084049`), `{YYYY}-{MM}-{DD} {name}`,
+and `{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}`. Name clashes get `_1`, `_2`… (so two photos from the same second
+become `20261024084049.jpg` and `20261024084049_1.jpg`); nothing is ever overwritten.
+
+To rename a single file by hand, right-click it → **Rename…** or press **F2**.
 
 ## What can be written where
 
@@ -109,6 +117,11 @@ Name clashes get `_1`, `_2`…; nothing is ever overwritten.
 | AVI, MKV, WMV, WEBM, BMP… | read-only (shown, not editable) | — |
 
 Editing keywords or labels keeps the file's Modified date unchanged.
+
+## If something goes wrong
+
+Unexpected errors pop up a message and are written to `%LOCALAPPDATA%\PhotoManager\errors.log`.
+Sending me that file is the quickest way to get a bug fixed.
 
 ## Settings
 
