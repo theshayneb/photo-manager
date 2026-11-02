@@ -15,6 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageOps
 
 from .media import kind
+from .winthumb import shell_thumbnail
 
 try:  # HEIC/HEIF support
     from pillow_heif import register_heif_opener
@@ -79,13 +80,20 @@ def thumbnail(path: str, size: int, cache_dir: Path | None = None) -> Image.Imag
                 return im.copy()
         except OSError:
             pass
+    im = None
     try:
         if kind(path) == "video":
-            im = video_frame(path, size)
+            # Windows' own thumbnail first (same as Explorer), then ffmpeg if installed.
+            im = shell_thumbnail(path, size) or video_frame(path, size)
         else:
             im = open_image(path, size)
     except Exception:  # noqa: BLE001 - corrupt/unsupported files just get no thumbnail
-        return None
+        im = None
+    if im is None and kind(path) != "video":
+        try:
+            im = shell_thumbnail(path, size)
+        except Exception:  # noqa: BLE001
+            im = None
     if im is not None and cached:
         try:
             cached.parent.mkdir(parents=True, exist_ok=True)

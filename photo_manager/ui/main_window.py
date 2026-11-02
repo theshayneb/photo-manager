@@ -1,4 +1,4 @@
-"""Main window: folder tree | thumbnail grid | sidebar."""
+"""Main window: favorites + folder tree | thumbnail grid | sidebar."""
 
 from __future__ import annotations
 
@@ -8,10 +8,13 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QDir, QModelIndex, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction, QActionGroup, QCloseEvent, QDesktopServices, QKeySequence, QShortcut,
+)
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QScrollArea, QSlider, QToolBar, QTreeView,
+    QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
+    QSlider, QSplitter, QToolBar, QTreeView, QVBoxLayout, QWidget,
 )
 
 from ..core import dates, fileops
@@ -19,8 +22,9 @@ from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
 from .dialogs import MoveDialog, TemplateDialog
-from .grid import Item, PhotoModel, ThumbGrid
-from .panels import Sidebar
+from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
+from .panels import PANELS, Sidebar
+from .theme import THEMES, apply_theme
 from .viewer import Viewer
 from .workers import Background
 
@@ -33,6 +37,9 @@ QPushButton[keyword="true"][state="all"] {
 QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); }
 QPushButton[chip="true"] { padding: 2px 8px; }
 QLabel[hint="true"] { color: gray; }
+QToolButton[section="true"] { font-weight: bold; text-align: left; padding: 4px; border: none;
+    border-bottom: 1px solid palette(mid); }
+QLabel[dockTitle="true"] { font-weight: bold; padding: 4px 2px 2px 2px; }
 """
 
 
@@ -53,15 +60,20 @@ class MainWindow(QMainWindow):
 
         self.model = PhotoModel(cache_dir() / "thumbs", self)
         self.model.sort_by = settings.sort_by
+        self.model.group_by = settings.group_by if settings.group_by in GROUPS else "none"
+        self.model.week_start = settings.week_start
         self.grid = ThumbGrid(self.model)
+        self.grid.delegate.display_format = settings.display_format
         self.grid.set_thumb_size(settings.thumb_size)
+        self.grid.set_info_fields(settings.thumb_info)
         self.grid.selectionModel().selectionChanged.connect(lambda *_: self._schedule_refresh())
         self.grid.activated.connect(lambda _idx: self.open_viewer())
         self.setCentralWidget(self.grid)
 
-        self._build_tree()
+        self._build_folders()
         self._build_sidebar()
         self._build_toolbar()
+        self._build_menus()
         self._build_shortcuts()
         self.status = QLabel()
         self.statusBar().addWidget(self.status, 1)
@@ -89,7 +101,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ UI
 
-    def _build_tree(self) -> None:
+    def _build_folders(self) -> None:
         self.fs_model = QFileSystemModel(self)
         self.fs_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot | QDir.Filter.Drives)
         self.fs_model.setRootPath("")
@@ -101,9 +113,39 @@ class MainWindow(QMainWindow):
         self.tree.setAnimated(False)
         self.tree.clicked.connect(self._tree_clicked)
         self.tree.activated.connect(self._tree_clicked)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._tree_menu)
+
+        self.favorites = QListWidget()
+        self.favorites.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.favorites.itemClicked.connect(lambda item: self.open_folder(item.data(Qt.ItemDataRole.UserRole)))
+        self.favorites.model().rowsMoved.connect(lambda *_: self._save_favorite_order())
+        self.favorites.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.favorites.customContextMenuRequested.connect(self._favorites_menu)
+        self.favorites.setToolTip("Right-click a folder in the tree → Add to Favorites. Drag to reorder.")
+        self._fill_favorites()
+
+        def titled(title: str, widget: QWidget) -> QWidget:
+            box = QWidget()
+            layout = QVBoxLayout(box)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            label = QLabel(title)
+            label.setProperty("dockTitle", True)
+            layout.addWidget(label)
+            layout.addWidget(widget)
+            return box
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(titled("★ Favorites", self.favorites))
+        splitter.addWidget(titled("Folders", self.tree))
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 4)
+        splitter.setSizes([150, 600])
         dock = QDockWidget("Folders", self)
         dock.setObjectName("folders")
-        dock.setWidget(self.tree)
+        dock.setTitleBarWidget(QWidget())
+        dock.setWidget(splitter)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         self.resizeDocks([dock], [280], Qt.Orientation.Horizontal)
@@ -115,11 +157,12 @@ class MainWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self.sidebar)
         scroll.setMinimumWidth(340)
-        dock = QDockWidget("Details", self)
-        dock.setObjectName("details")
-        dock.setWidget(scroll)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.details_dock = QDockWidget("Details", self)
+        self.details_dock.setObjectName("details")
+        self.details_dock.setTitleBarWidget(QWidget())
+        self.details_dock.setWidget(scroll)
+        self.details_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.details_dock)
 
     def _build_toolbar(self) -> None:
         bar = QToolBar("Main")
@@ -136,10 +179,17 @@ class MainWindow(QMainWindow):
         self.address = QLineEdit()
         self.address.setPlaceholderText("Folder path")
         self.address.returnPressed.connect(lambda: self.open_folder(self.address.text().strip().strip('"')))
-        self.address.setMinimumWidth(320)
+        self.address.setMinimumWidth(280)
         bar.addWidget(self.address)
 
-        refresh = QAction("⟳ Refresh", self)
+        self.fav_action = QAction("☆", self)
+        self.fav_action.setToolTip("Add this folder to Favorites (Ctrl+D)")
+        self.fav_action.setShortcut(QKeySequence("Ctrl+D"))
+        self.fav_action.triggered.connect(lambda: self.toggle_favorite(self.model.folder))
+        bar.addAction(self.fav_action)
+
+        refresh = QAction("⟳", self)
+        refresh.setToolTip("Refresh (F5)")
         refresh.setShortcut(QKeySequence("F5"))
         refresh.triggered.connect(lambda: self.open_folder(self.model.folder))
         bar.addAction(refresh)
@@ -153,11 +203,19 @@ class MainWindow(QMainWindow):
         self.sort_combo.currentIndexChanged.connect(self._sort_changed)
         bar.addWidget(self.sort_combo)
 
+        bar.addWidget(QLabel("  Group: "))
+        self.group_combo = QComboBox()
+        for key, label in GROUPS.items():
+            self.group_combo.addItem(label, key)
+        self.group_combo.setCurrentIndex(max(0, self.group_combo.findData(self.model.group_by)))
+        self.group_combo.currentIndexChanged.connect(lambda _i: self.set_group(self.group_combo.currentData()))
+        bar.addWidget(self.group_combo)
+
         bar.addWidget(QLabel("  Size: "))
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(80, 320)
         slider.setValue(self.settings.thumb_size)
-        slider.setFixedWidth(120)
+        slider.setFixedWidth(110)
         slider.valueChanged.connect(self._size_changed)
         bar.addWidget(slider)
         bar.addSeparator()
@@ -167,7 +225,7 @@ class MainWindow(QMainWindow):
             ("Move to…", "Ctrl+M", "Move selected files to another folder (Ctrl+M)", self.move_selected),
             ("Delete", "", "Send selected files to the Recycle Bin (Delete)", self.delete_selected),
             ("Show in Explorer", "Ctrl+E", "Show in Windows Explorer (Ctrl+E)", self.show_in_explorer),
-            ("Open with default app", "Ctrl+O", "Open in the default Windows app (Ctrl+O)", self.open_external_selected),
+            ("Open", "Ctrl+O", "Open in the default Windows app (Ctrl+O)", self.open_external_selected),
         ):
             action = QAction(text, self)
             action.setToolTip(tip)
@@ -175,6 +233,58 @@ class MainWindow(QMainWindow):
                 action.setShortcut(QKeySequence(shortcut))
             action.triggered.connect(slot)
             bar.addAction(action)
+
+    def _build_menus(self) -> None:
+        view = self.menuBar().addMenu("&View")
+
+        panels = view.addMenu("Sidebar panels")
+        self.panel_actions: dict[str, QAction] = {}
+        for key, title in PANELS.items():
+            action = panels.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(key not in self.settings.hidden_panels)
+            action.toggled.connect(lambda on, k=key: self.sidebar.set_panel_visible(k, on))
+            self.panel_actions[key] = action
+        panels.addSeparator()
+        sidebar_toggle = self.details_dock.toggleViewAction()
+        sidebar_toggle.setText("Show sidebar")
+        sidebar_toggle.setShortcut(QKeySequence("F9"))
+        panels.addAction(sidebar_toggle)
+
+        info = view.addMenu("Show under thumbnails")
+        for key, title in INFO_FIELDS.items():
+            action = info.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(key in self.settings.thumb_info)
+            action.toggled.connect(lambda on, k=key: self._toggle_info(k, on))
+
+        group = view.addMenu("Group by")
+        self.group_actions = QActionGroup(self)
+        self.group_menu_actions: dict[str, QAction] = {}
+        for key, title in GROUPS.items():
+            action = group.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(key == self.model.group_by)
+            action.triggered.connect(lambda _c=False, k=key: self.set_group(k))
+            self.group_actions.addAction(action)
+            self.group_menu_actions[key] = action
+        group.addSeparator()
+        weeks = QActionGroup(self)
+        for key, title in (("sunday", "Weeks start on Sunday"), ("monday", "Weeks start on Monday")):
+            action = group.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(self.settings.week_start == key)
+            action.triggered.connect(lambda _c=False, k=key: self.set_week_start(k))
+            weeks.addAction(action)
+
+        theme = view.addMenu("Theme")
+        themes = QActionGroup(self)
+        for key, title in THEMES.items():
+            action = theme.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(self.settings.theme == key)
+            action.triggered.connect(lambda _c=False, k=key: self.set_theme(k))
+            themes.addAction(action)
 
     def _build_shortcuts(self) -> None:
         delete = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.grid)
@@ -184,6 +294,96 @@ class MainWindow(QMainWindow):
             sc.activated.connect(lambda name=label: self._label_shortcut(name))
         clear = QShortcut(QKeySequence("Ctrl+0"), self)
         clear.activated.connect(lambda: self._label_shortcut(""))
+
+    # -------------------------------------------------------------- options
+
+    def set_group(self, key: str) -> None:
+        if key not in GROUPS:
+            return
+        self.settings.group_by = key
+        self.model.group_by = key
+        for widget_key, action in self.group_menu_actions.items():
+            action.setChecked(widget_key == key)
+        self.group_combo.blockSignals(True)
+        self.group_combo.setCurrentIndex(max(0, self.group_combo.findData(key)))
+        self.group_combo.blockSignals(False)
+        self.regroup()
+
+    def set_week_start(self, key: str) -> None:
+        self.settings.week_start = key
+        self.model.week_start = key
+        if self.model.group_by == "week":
+            self.regroup()
+
+    def set_theme(self, key: str) -> None:
+        self.settings.theme = key
+        apply_theme(key)
+        self.grid.viewport().update()
+
+    def _toggle_info(self, key: str, on: bool) -> None:
+        fields = [f for f in self.settings.thumb_info if f != key]
+        if on:
+            fields.append(key)
+        self.settings.thumb_info = [f for f in INFO_FIELDS if f in fields]
+        self.grid.set_info_fields(self.settings.thumb_info)
+
+    # ------------------------------------------------------------ favorites
+
+    def _fill_favorites(self) -> None:
+        self.favorites.clear()
+        for folder in self.settings.favorites:
+            name = os.path.basename(os.path.normpath(folder)) or folder
+            item = QListWidgetItem(f"★  {name}")
+            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setToolTip(folder)
+            if not os.path.isdir(folder):
+                item.setForeground(Qt.GlobalColor.gray)
+                item.setToolTip(folder + "  (not found)")
+            self.favorites.addItem(item)
+
+    def _save_favorite_order(self) -> None:
+        self.settings.favorites = [self.favorites.item(i).data(Qt.ItemDataRole.UserRole)
+                                   for i in range(self.favorites.count())]
+
+    def is_favorite(self, folder: str) -> bool:
+        return any(_key(f) == _key(folder) for f in self.settings.favorites)
+
+    def toggle_favorite(self, folder: str) -> None:
+        if not folder:
+            return
+        if self.is_favorite(folder):
+            self.settings.favorites = [f for f in self.settings.favorites if _key(f) != _key(folder)]
+        else:
+            self.settings.favorites.append(os.path.normpath(folder))
+        self._fill_favorites()
+        self._update_fav_button()
+        self.settings.save()
+
+    def _update_fav_button(self) -> None:
+        fav = self.is_favorite(self.model.folder) if self.model.folder else False
+        self.fav_action.setText("★" if fav else "☆")
+        self.fav_action.setToolTip(("Remove this folder from" if fav else "Add this folder to") + " Favorites (Ctrl+D)")
+
+    def _tree_menu(self, pos) -> None:  # type: ignore[no-untyped-def]
+        index = self.tree.indexAt(pos)
+        path = self.fs_model.filePath(index) if index.isValid() else ""
+        if not path:
+            return
+        menu = QMenu(self)
+        menu.addAction("Remove from Favorites" if self.is_favorite(path) else "Add to Favorites",
+                       lambda: self.toggle_favorite(path))
+        menu.addAction("Open", lambda: self.open_folder(path))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _favorites_menu(self, pos) -> None:  # type: ignore[no-untyped-def]
+        item = self.favorites.itemAt(pos)
+        if not item:
+            return
+        folder = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        menu.addAction("Open", lambda: self.open_folder(folder))
+        menu.addAction("Remove from Favorites", lambda: self.toggle_favorite(folder))
+        menu.exec(self.favorites.viewport().mapToGlobal(pos))
 
     # ------------------------------------------------------------- folders
 
@@ -206,13 +406,15 @@ class MainWindow(QMainWindow):
         self.model.load_folder(folder)
         self.settings.last_folder = folder
         self.address.setText(folder)
+        self._update_fav_button()
         index = self.fs_model.index(folder)
         if index.isValid():
             self.tree.setCurrentIndex(index)
             self.tree.scrollTo(index)
         self.grid.scrollToTop()
-        if self.model.items:
-            self.grid.setCurrentIndex(self.model.index(0))
+        first = self.model.first_item_row()
+        if first >= 0:
+            self.grid.setCurrentIndex(self.model.index(first))
         self._show_count()
         self._load_meta([i.path for i in self.model.items])
         self.refresh_sidebar()
@@ -223,21 +425,22 @@ class MainWindow(QMainWindow):
 
     def _sort_changed(self) -> None:
         self.settings.sort_by = self.sort_combo.currentData()
-        selected = self.grid.selected_paths()
-        self.model.set_sort(self.settings.sort_by)
-        self._reselect(selected)
+        self.model.sort_by = self.settings.sort_by
+        self.regroup()
 
     def _size_changed(self, value: int) -> None:
         self.settings.thumb_size = value
         self.grid.set_thumb_size(value)
 
-    def _reselect(self, paths: list[str]) -> None:
-        sel = self.grid.selectionModel()
-        sel.clearSelection()
-        for path in paths:
-            row = self.model.row_of(path)
-            if row >= 0:
-                sel.select(self.model.index(row), sel.SelectionFlag.Select)
+    def regroup(self, select: list[str] | None = None, current: str | None = None) -> None:
+        """Rebuild the grid order/groups while keeping selection, focus and scroll position."""
+        selected = self.grid.selected_paths() if select is None else select
+        current = current if current is not None else self.grid.current_path()
+        scroll = self.grid.verticalScrollBar().value()
+        self.model.regroup()
+        self.grid.select_paths(selected, current=current)
+        self.grid.doItemsLayout()
+        self.grid.verticalScrollBar().setValue(scroll)
 
     # ------------------------------------------------------------ metadata
 
@@ -267,8 +470,8 @@ class MainWindow(QMainWindow):
         if metas:
             selected = self.grid.selected_paths()
             self.model.set_meta(metas)
-            if self.model.sort_by == "date":
-                self._reselect(selected)
+            if self.model.needs_regroup_for_meta():
+                self.regroup(selected)
             if {_key(p) for p in selected} & {_key(p) for p in metas}:
                 self._schedule_refresh()
 
@@ -334,11 +537,22 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------- file ops
 
     def _after_removal(self, removed: list[str]) -> None:
-        current = self.grid.currentIndex().row()
+        gone = {_key(p) for p in removed}
+        current = self.grid.current_path()
+        target = None
+        if current:
+            for delta in range(1, len(self.model.items) + 1):
+                for d in (delta, -delta):
+                    cand = self.model.neighbour(current, d)
+                    if cand and _key(cand.path) not in gone:
+                        target = cand.path
+                        break
+                if target:
+                    break
+            if _key(current) not in gone:
+                target = current
         self.model.remove_paths(removed)
-        if self.model.items:
-            row = min(max(current, 0), len(self.model.items) - 1)
-            self.grid.setCurrentIndex(self.model.index(row))
+        self.regroup(select=[target] if target else [], current=target)
         self._show_count()
         self.refresh_sidebar()
 
@@ -372,7 +586,8 @@ class MainWindow(QMainWindow):
         paths = self.grid.selected_paths()
         if not paths:
             return
-        dlg = MoveDialog(self.settings.recent_move_folders, self.model.folder, len(paths), self)
+        dlg = MoveDialog(self.settings.favorites, self.settings.recent_move_folders,
+                         self.model.folder, len(paths), self)
         if not dlg.exec() or not dlg.folder:
             return
         folder = dlg.folder
@@ -400,7 +615,7 @@ class MainWindow(QMainWindow):
                 return
             renamed, failures = result
             self.model.rename_paths(renamed)
-            self._reselect(list(renamed.values()) + [p for p, _ in failures])
+            self.regroup(select=list(renamed.values()) + [p for p, _ in failures])
             self.status.setText(f"Renamed {len(renamed)} file(s).")
             if failures:
                 QMessageBox.warning(self, "Rename", "\n".join(f"{p}: {e}" for p, e in failures[:10]))
@@ -445,8 +660,8 @@ class MainWindow(QMainWindow):
             if self.viewer:
                 self.viewer.close()
             return
-        row = self.model.row_of(item.path)
-        parts = [f"{row + 1} / {len(self.model.items)}", item.name]
+        position = next((n for n, i in enumerate(self.model.items) if i is item), 0)
+        parts = [f"{position + 1} / {len(self.model.items)}", item.name]
         if item.meta and item.meta.date_taken:
             parts.append(dates.format_display(item.meta.date_taken, self.settings.display_format))
         if item.meta and item.meta.label:
@@ -454,16 +669,17 @@ class MainWindow(QMainWindow):
         self.viewer.show_path(item.path, "   ·   ".join(parts), item.kind, self.open_external)
 
     def _viewer_step(self, delta: int) -> None:
-        row = self.grid.currentIndex().row() + delta
-        if 0 <= row < len(self.model.items):
-            self.grid.setCurrentIndex(self.model.index(row))
+        path = self.grid.current_path()
+        target = self.model.neighbour(path, delta) if path else None
+        if target:
+            self.grid.select_paths([target.path], current=target.path)
+            self.grid.scrollTo(self.model.index(self.model.row_of(target.path)))
             self._viewer_show_current()
 
     def _viewer_delete(self) -> None:
         path = self.grid.current_path()
         if path:
-            self.grid.selectionModel().clearSelection()
-            self.grid.setCurrentIndex(self.model.index(self.model.row_of(path)))
+            self.grid.select_paths([path], current=path)
             self.delete_selected()
 
     # ---------------------------------------------------------------- close
@@ -479,4 +695,3 @@ class MainWindow(QMainWindow):
         if self.et:
             self.et.close()
         super().closeEvent(event)
-

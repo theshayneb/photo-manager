@@ -19,8 +19,8 @@ Windows Explorer, XnView, Lightroom and Bridge all see the same keywords, labels
 
 Windows SmartScreen may warn the first time because the app isn't signed: choose **More info → Run anyway**.
 
-**Video thumbnails** need ffmpeg. Without it videos show a "video" placeholder (everything else still works).
-To add it, run: `winget install Gyan.FFmpeg`, then restart the app.
+**Video thumbnails** come from Windows itself (the same ones Explorer shows). If a video has no thumbnail in
+Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app a second way to make one.
 
 ## Using it
 
@@ -34,6 +34,16 @@ To add it, run: `winget install Gyan.FFmpeg`, then restart the app.
 | Color label | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** none. Pressing the same label again removes it |
 | Show in Explorer / open in default app | **Ctrl+E** / **Ctrl+O** |
 | Refresh | **F5** |
+| Favorite folder | **Ctrl+D** or the ☆ button adds/removes the current folder; or right-click a folder in the tree |
+| Show/hide the sidebar | **F9** |
+
+### View menu
+
+- **Sidebar panels**: hide panels you don't use. Click a panel's title in the sidebar to collapse it.
+- **Show under thumbnails**: Date taken (on by default), dimensions, file size, keywords.
+- **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday.
+  Click a group's header to select everything in it (Ctrl+click adds to the selection).
+- **Theme**: Dark (default), Light, or follow Windows.
 
 ### Keywords
 
@@ -69,9 +79,11 @@ Built-in templates:
 `{hh}` (01–12) with `{AMPM}`, `{mm}` `{ss}` `{fff}` (milliseconds, ignored), and `*` any text, `?` one character, `#` one digit.
 `{MM}` is month and `{mm}` is minute.
 
-### Rename by date taken
+### Rename
 
-Uses the same placeholders, e.g. `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` → `2026-10-23_14-34-14.jpg`.
+Choose which date to use: **Date taken** (EXIF DateTimeOriginal), **EXIF Create Date**, or the Windows
+Created/Modified date. The pattern uses the same placeholders plus `{name}` (the current name), e.g.
+`{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` → `2026-10-23_14-34-14.jpg`.
 Name clashes get `_1`, `_2`…; nothing is ever overwritten.
 
 ## What can be written where

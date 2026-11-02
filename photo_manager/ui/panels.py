@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -111,9 +111,9 @@ class InfoPanel(QWidget):
 # Color labels
 # --------------------------------------------------------------------------
 
-class LabelPanel(QGroupBox):
+class LabelPanel(QWidget):
     def __init__(self, ctl: Controller):
-        super().__init__("Color label")
+        super().__init__()
         self.ctl = ctl
         self.items: list[Item] = []
         row = QHBoxLayout(self)
@@ -157,9 +157,9 @@ class LabelPanel(QGroupBox):
 # Date taken (typed, shifted, or from filename)
 # --------------------------------------------------------------------------
 
-class DatePanel(QGroupBox):
+class DatePanel(QWidget):
     def __init__(self, ctl: Controller):
-        super().__init__("Date taken")
+        super().__init__()
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
@@ -356,21 +356,55 @@ class DatePanel(QGroupBox):
 # Rename by date
 # --------------------------------------------------------------------------
 
-class RenamePanel(QGroupBox):
+RENAME_SOURCES = {
+    "taken": "Date taken (EXIF DateTimeOriginal)",
+    "created": "EXIF Create Date (digitized)",
+    "file_created": "Windows Created date",
+    "file_modified": "Windows Modified date",
+}
+
+
+def rename_date(item: Item, source: str) -> datetime | None:
+    meta = item.meta
+    if source == "file_modified":
+        return datetime.fromtimestamp(item.mtime).replace(microsecond=0)
+    if meta is None:
+        return None
+    if source == "created":
+        return meta.create_date
+    if source == "file_created":
+        return meta.file_created
+    return meta.date_taken
+
+
+class RenamePanel(QWidget):
     def __init__(self, ctl: Controller):
-        super().__init__("Rename by date taken")
+        super().__init__()
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Date to use:"))
+        self.source = QComboBox()
+        for key, label in RENAME_SOURCES.items():
+            self.source.addItem(label, key)
+        self.source.setCurrentIndex(max(0, self.source.findData(ctl.settings.rename_source)))
+        self.source.currentIndexChanged.connect(self._source_changed)
+        layout.addWidget(self.source)
+        layout.addWidget(QLabel("New name:"))
         self.pattern = QLineEdit(ctl.settings.rename_pattern)
-        self.pattern.setToolTip("{YYYY} {YY} {MM} {DD} {HH} {hh} {mm} {ss} {AMPM}")
         self.pattern.textChanged.connect(self._changed)
         layout.addWidget(self.pattern)
+        layout.addWidget(_hint("{YYYY} {YY} {MM} {DD} {HH} {mm} {ss} · {hh} {AMPM} for 12-hour · "
+                               "{name} = current name"))
         self.example = _hint("")
         layout.addWidget(self.example)
         self.button = QPushButton("Rename")
         self.button.clicked.connect(self.apply)
         layout.addWidget(self.button)
+
+    def _source_changed(self) -> None:
+        self.ctl.settings.rename_source = self.source.currentData()
+        self.refresh(self.items)
 
     def _changed(self, text: str) -> None:
         self.ctl.settings.rename_pattern = text
@@ -380,8 +414,13 @@ class RenamePanel(QGroupBox):
         pattern = self.pattern.text().strip()
         if not pattern:
             return {}
-        return {i.path: dates.format_pattern(pattern, i.meta.date_taken)
-                for i in self.items if i.meta and i.meta.date_taken}
+        source = self.source.currentData()
+        names = {}
+        for item in self.items:
+            dt = rename_date(item, source)
+            if dt is not None:
+                names[item.path] = dates.format_pattern(pattern, dt, os.path.splitext(item.name)[0])
+        return names
 
     def refresh(self, items: list[Item]) -> None:
         self.items = items
@@ -390,12 +429,12 @@ class RenamePanel(QGroupBox):
             first = next(iter(names))
             example = names[first] + os.path.splitext(first)[1]
             skipped = len(items) - len(names)
-            text = f"→ {example}"
+            text = f"{os.path.basename(first)}\n→ {example}"
             if skipped:
-                text += f"\n{skipped} without a date will be skipped"
+                text += f"\n{skipped} without that date will be skipped"
             self.example.setText(text)
         else:
-            self.example.setText("Selected files have no date taken." if items else "")
+            self.example.setText("Selected files don't have that date." if items else "")
         self.button.setText(f"Rename {len(names)} file{'s' if len(names) != 1 else ''}")
         self.button.setEnabled(bool(names))
 
@@ -411,11 +450,11 @@ class RenamePanel(QGroupBox):
 # Keyword buttons
 # --------------------------------------------------------------------------
 
-class KeywordPanel(QGroupBox):
+class KeywordPanel(QWidget):
     COLUMNS = 3
 
     def __init__(self, ctl: Controller):
-        super().__init__("Keywords")
+        super().__init__()
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
@@ -625,23 +664,79 @@ class KeywordPanel(QGroupBox):
         self.ctl.write_metadata(jobs, what)
 
 
+class Section(QWidget):
+    """A sidebar panel with a clickable header that collapses it."""
+
+    def __init__(self, key: str, title: str, body: QWidget, collapsed: bool):
+        super().__init__()
+        self.key = key
+        self.body = body
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 6)
+        layout.setSpacing(2)
+        self.header = QToolButton()
+        self.header.setText(title)
+        self.header.setCheckable(True)
+        self.header.setChecked(not collapsed)
+        self.header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.header.setProperty("section", True)
+        self.header.toggled.connect(self._toggled)
+        layout.addWidget(self.header)
+        layout.addWidget(body)
+        self._toggled(not collapsed)
+
+    def _toggled(self, open_: bool) -> None:
+        self.header.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        self.body.setVisible(open_)
+
+    @property
+    def collapsed(self) -> bool:
+        return not self.header.isChecked()
+
+
+PANELS = {
+    "info": "Preview",
+    "labels": "Color label",
+    "keywords": "Keywords",
+    "dates": "Date taken",
+    "rename": "Rename",
+}
+
+
 class Sidebar(QWidget):
     def __init__(self, ctl: Controller):
         super().__init__()
+        self.ctl = ctl
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         self.warning = QLabel()
         self.warning.setWordWrap(True)
         self.warning.setStyleSheet("background:#5c2b00;color:white;padding:6px;border-radius:4px;")
         self.warning.setVisible(False)
+        layout.addWidget(self.warning)
         self.info = InfoPanel(ctl)
         self.labels = LabelPanel(ctl)
         self.keywords = KeywordPanel(ctl)
         self.dates = DatePanel(ctl)
         self.rename = RenamePanel(ctl)
-        for widget in (self.warning, self.info, self.labels, self.keywords, self.dates, self.rename):
-            layout.addWidget(widget)
+        self.sections: dict[str, Section] = {}
+        collapsed = set(ctl.settings.collapsed_panels)
+        for key, title in PANELS.items():
+            section = Section(key, title, getattr(self, key), key in collapsed)
+            section.header.toggled.connect(lambda _on: self._remember())
+            section.setVisible(key not in ctl.settings.hidden_panels)
+            self.sections[key] = section
+            layout.addWidget(section)
         layout.addStretch(1)
+
+    def _remember(self) -> None:
+        self.ctl.settings.collapsed_panels = [k for k, s in self.sections.items() if s.collapsed]
+
+    def set_panel_visible(self, key: str, visible: bool) -> None:
+        self.sections[key].setVisible(visible)
+        hidden = [k for k, s in self.sections.items() if s.isHidden()]
+        self.ctl.settings.hidden_panels = hidden
 
     def refresh(self, items: list[Item]) -> None:
         for panel in (self.info, self.labels, self.keywords, self.dates, self.rename):

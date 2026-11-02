@@ -10,6 +10,7 @@ from . import __version__
 from .core.exiftool import ExifTool, ExifToolError, find_exiftool
 from .core.settings import Settings
 from .ui.main_window import MainWindow
+from .ui.theme import apply_theme
 
 
 def start_exiftool(settings: Settings) -> ExifTool | None:
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
     app.setOrganizationName("PhotoManager")
     settings = Settings.load()
+    apply_theme(settings.theme, app)
     window = MainWindow(settings, start_exiftool(settings))
     window.show()
     return app.exec()

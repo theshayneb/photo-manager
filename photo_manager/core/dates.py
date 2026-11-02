@@ -6,6 +6,7 @@ Placeholders shared by rename patterns and filename templates:
     {MM}   month 01-12       {DD} day 01-31
     {HH}   hour 00-23        {hh} hour 01-12      {AMPM} AM/PM
     {mm}   minute            {ss} second
+    {name} current filename (rename patterns only)
 """
 
 from __future__ import annotations
@@ -118,8 +119,11 @@ def parse_shift(text: str) -> timedelta:
 _INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
-def format_pattern(pattern: str, dt: datetime) -> str:
-    """Fill a rename pattern like "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"."""
+def format_pattern(pattern: str, dt: datetime, name: str = "") -> str:
+    """Fill a rename pattern like "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}".
+
+    {name} is the file's current name without its extension.
+    """
     values = {
         "YYYY": f"{dt.year:04d}",
         "YY": f"{dt.year % 100:02d}",
@@ -130,6 +134,7 @@ def format_pattern(pattern: str, dt: datetime) -> str:
         "mm": f"{dt.minute:02d}",
         "ss": f"{dt.second:02d}",
         "AMPM": "AM" if dt.hour < 12 else "PM",
+        "name": name,
     }
 
     def repl(match: re.Match[str]) -> str:

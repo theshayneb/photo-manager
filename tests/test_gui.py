@@ -1,10 +1,11 @@
 """End-to-end: the real window, driven offscreen, with the stand-in ExifTool."""
 
+import os
 from datetime import datetime
 
 import pytest
 from PIL import Image
-from PySide6.QtCore import QItemSelectionModel
+from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtWidgets import QApplication
 
 from photo_manager.core.exiftool import ExifTool
@@ -48,7 +49,7 @@ def select(win, *names):
     sel = win.grid.selectionModel()
     sel.clearSelection()
     for name in names:
-        row = next(r for r, i in enumerate(win.model.items) if i.name == name)
+        row = next(win.model.row_of(i.path) for i in win.model.items if i.name == name)
         sel.select(win.model.index(row), QItemSelectionModel.SelectionFlag.Select)
     win.refresh_sidebar()
 
@@ -143,7 +144,7 @@ def test_move_and_viewer(window, tmp_path, monkeypatch):
     dest = tmp_path / "sorted"
     dest.mkdir()
     select(win, "vacation.jpg")
-    win.grid.setCurrentIndex(win.model.index(win.model.row_of(str(folder / "vacation.jpg"))))
+    win.grid.select_paths([str(folder / "vacation.jpg")], current=str(folder / "vacation.jpg"))
     win.open_viewer()
     assert win.viewer.isVisible() and win.viewer._pixmap is not None
     win.viewer.close()
@@ -164,3 +165,97 @@ def test_move_and_viewer(window, tmp_path, monkeypatch):
     assert (dest / "vacation.jpg").exists() and not (folder / "vacation.jpg").exists()
     assert len(win.model.items) == 2
     assert win.settings.recent_move_folders[0] == str(dest)
+
+
+def set_dates(win, et, folder, dates_by_name):
+    for name, dt in dates_by_name.items():
+        et.write(str(folder / name), [f"-AllDates={dt:%Y:%m:%d %H:%M:%S}"])
+    win.open_folder(str(folder))
+    settle(win)
+
+
+def headers(win):
+    return [r.title for r in win.model.rows if not hasattr(r, "kind")]
+
+
+def test_group_by_week_respects_week_start(window):
+    win, folder, et = window
+    # Sat Oct 24, Sun Oct 25, Mon Oct 26 2026
+    set_dates(win, et, folder, {
+        "IMG_20261023_000100_358_3.jpg": datetime(2026, 10, 24, 12),
+        "Screenshot_20261023-143414.png": datetime(2026, 10, 25, 12),
+        "vacation.jpg": datetime(2026, 10, 26, 12),
+    })
+    win.set_group("week")
+    assert headers(win) == ["Week of Sun, Oct 18, 2026  –  Sat, Oct 24",
+                            "Week of Sun, Oct 25, 2026  –  Sat, Oct 31"]
+    win.set_week_start("monday")
+    assert headers(win) == ["Week of Mon, Oct 19, 2026  –  Sun, Oct 25",
+                            "Week of Mon, Oct 26, 2026  –  Sun, Nov 1"]
+    assert win.settings.group_by == "week" and win.settings.week_start == "monday"
+
+
+def test_group_by_label_and_header_click_selects_group(window):
+    win, folder, _ = window
+    select(win, "vacation.jpg", "IMG_20261023_000100_358_3.jpg")
+    win._label_shortcut("Blue")
+    settle(win)
+    win.set_group("label")
+    assert headers(win) == ["Blue", "No label"]
+    header_row = next(n for n, r in enumerate(win.model.rows) if getattr(r, "title", "") == "Blue")
+    assert not (win.model.flags(win.model.index(header_row)) & Qt.ItemFlag.ItemIsSelectable)
+    win.grid.select_paths(win.model.rows[header_row].paths)
+    assert sorted(os.path.basename(p) for p in win.grid.selected_paths()) == [
+        "IMG_20261023_000100_358_3.jpg", "vacation.jpg"]
+    # Viewer navigation skips headers.
+    first = win.model.items[0]
+    assert win.model.neighbour(first.path, 1) is win.model.items[1]
+
+
+def test_info_under_thumbnails(window):
+    win, folder, et = window
+    set_dates(win, et, folder, {"vacation.jpg": datetime(2026, 10, 31, 21, 14, 2)})
+    item = win.model.item(str(folder / "vacation.jpg"))
+    assert win.grid.delegate._info_lines(item) == ["10-31-2026 09:14:02 PM"]
+    win._toggle_info("filesize", True)
+    assert len(win.grid.delegate._info_lines(item)) == 2
+    assert win.settings.thumb_info == ["date", "filesize"]
+
+
+def test_rename_with_exif_create_date_and_name_token(window):
+    win, folder, et = window
+    et.write(str(folder / "vacation.jpg"), ["-EXIF:CreateDate=2025:01:02 03:04:05"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg")
+    panel = win.sidebar.rename
+    panel.source.setCurrentIndex(panel.source.findData("created"))
+    panel.pattern.setText("{YYYY}-{MM}-{DD} {name}")
+    assert "2025-01-02 vacation.jpg" in panel.example.text()
+    panel.apply()
+    settle(win)
+    assert (folder / "2025-01-02 vacation.jpg").exists()
+
+
+def test_favorites_and_panels(window, tmp_path):
+    win, folder, _ = window
+    win.toggle_favorite(str(folder))
+    assert win.settings.favorites == [str(folder)] and win.favorites.count() == 1
+    assert win.fav_action.text() == "★"
+    win.toggle_favorite(str(folder))
+    assert win.settings.favorites == [] and win.fav_action.text() == "☆"
+
+    win.panel_actions["rename"].setChecked(False)
+    assert win.sidebar.sections["rename"].isHidden()
+    assert win.settings.hidden_panels == ["rename"]
+    win.sidebar.sections["keywords"].header.setChecked(False)
+    assert win.sidebar.keywords.isHidden()
+    assert win.settings.collapsed_panels == ["keywords"]
+
+
+def test_dark_theme_applies(window):
+    win, _, _ = window
+    win.set_theme("dark")
+    assert QApplication.instance().palette().window().color().name() == "#26282c"
+    win.set_theme("light")
+    assert win.settings.theme == "light"

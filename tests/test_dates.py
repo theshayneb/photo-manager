@@ -45,3 +45,7 @@ def test_format_pattern():
     assert format_pattern("{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}", dt) == "2026-10-31_21-14-02"
     assert format_pattern("{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}", dt) == "10-31-2026 09-14-02 PM"
     assert format_pattern("{YYYY}/{MM}:x", dt) == "2026-10-x"  # Windows-illegal characters replaced
+
+
+def test_format_pattern_name_token():
+    assert format_pattern("{YYYY}-{MM}-{DD} {name}", datetime(2026, 1, 2), "IMG_1234") == "2026-01-02 IMG_1234"

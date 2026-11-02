@@ -10,6 +10,7 @@ from PySide6.QtGui import QKeyEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 from ..core import thumbs
+from ..core.winthumb import shell_thumbnail
 from .grid import pil_to_qimage
 
 
@@ -44,7 +45,10 @@ class Viewer(QDialog):
         screen = self.screen().availableGeometry() if self.screen() else None
         longest = max(screen.width(), screen.height()) if screen else 2560
         try:
-            im = thumbs.video_frame(path, longest) if kind == "video" else thumbs.open_image(path, longest)
+            if kind == "video":
+                im = shell_thumbnail(path, 1024) or thumbs.video_frame(path, longest)
+            else:
+                im = thumbs.open_image(path, longest)
         except Exception:  # noqa: BLE001
             im = None
         if im is not None:

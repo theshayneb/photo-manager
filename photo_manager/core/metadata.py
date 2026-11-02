@@ -44,6 +44,7 @@ _EXIF_DATE = re.compile(r"(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2})(?::
 class Meta:
     date_taken: datetime | None = None
     date_source: str = ""
+    create_date: datetime | None = None  # EXIF/XMP/QuickTime CreateDate ("digitized")
     file_created: datetime | None = None
     file_modified: datetime | None = None
     keywords: list[str] = field(default_factory=list)
@@ -78,6 +79,10 @@ def parse_meta(data: dict) -> Meta:
         dt = parse_exif_date(data.get(key))
         if dt:
             meta.date_taken, meta.date_source = dt, source
+            break
+    for key in ("EXIF:CreateDate", "XMP:CreateDate", "QuickTime:CreateDate"):
+        meta.create_date = parse_exif_date(data.get(key))
+        if meta.create_date:
             break
     meta.file_created = parse_exif_date(data.get("File:FileCreateDate"))
     meta.file_modified = parse_exif_date(data.get("File:FileModifyDate"))

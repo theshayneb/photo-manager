@@ -48,6 +48,14 @@ class Settings:
         default_factory=lambda: [FilenameTemplate(**t.to_dict()) for t in DEFAULT_TEMPLATES]
     )
     recent_move_folders: list[str] = field(default_factory=list)
+    favorites: list[str] = field(default_factory=list)
+    rename_source: str = "taken"  # taken | created | file_created | file_modified
+    theme: str = "dark"  # dark | light | system
+    group_by: str = "none"  # none | day | week | month | label
+    week_start: str = "sunday"  # sunday | monday
+    thumb_info: list[str] = field(default_factory=lambda: ["date"])
+    hidden_panels: list[str] = field(default_factory=list)
+    collapsed_panels: list[str] = field(default_factory=list)
     window_geometry: str = ""
     window_state: str = ""
 

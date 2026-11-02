@@ -150,17 +150,25 @@ class TemplateDialog(QDialog):
 class MoveDialog(QDialog):
     """Pick a destination: recent folders (double-click / Enter) or Browse."""
 
-    def __init__(self, recent: list[str], start_dir: str, count: int, parent: QWidget | None = None):
+    def __init__(self, favorites: list[str], recent: list[str], start_dir: str, count: int,
+                 parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Move {count} file{'s' if count != 1 else ''} to…")
         self.resize(520, 360)
         self.start_dir = start_dir
         self.folder = ""
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Recent folders (number keys pick 1–9):"))
+        layout.addWidget(QLabel("★ Favorites, then recent folders (number keys pick 1–9):"))
         self.list = QListWidget()
-        for n, folder in enumerate(f for f in recent if os.path.isdir(f)):
-            item = QListWidgetItem(f"{n + 1}.  {folder}" if n < 9 else f"     {folder}")
+        folders, seen = [], set()
+        for folder in [*favorites, *recent]:
+            key = os.path.normcase(os.path.normpath(folder))
+            if key not in seen and os.path.isdir(folder):
+                seen.add(key)
+                folders.append((folder, folder in favorites))
+        for n, (folder, fav) in enumerate(folders):
+            star = "★ " if fav else "   "
+            item = QListWidgetItem(f"{n + 1}.  {star}{folder}" if n < 9 else f"      {star}{folder}")
             item.setData(Qt.ItemDataRole.UserRole, folder)
             self.list.addItem(item)
         self.list.itemActivated.connect(lambda item: self._choose(item.data(Qt.ItemDataRole.UserRole)))
