@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.4
+
+- Fixed: dragging photos did a box-selection instead of a drag, so they couldn't be dropped on a folder or
+  favorite. (Qt switches dragging off for grids whose items can't be rearranged; it's now switched back on.)
+- Fixed: a possible crash when closing the app after video thumbnails were shown.
+
 ## 0.7.3
 
 - **None** moved to the end of the Labels row and now removes everything: the color, ★ and 🔖 (also Ctrl+0).

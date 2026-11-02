@@ -767,3 +767,27 @@ def test_none_clears_color_star_and_bookmark(window):
     # Same row: vertical centres line up (buttons differ in height by a few pixels).
     assert abs(panel.clear.geometry().center().y() - panel.buttons["Red"].geometry().center().y()) <= 3
     assert panel.clear.x() > panel.flag_buttons["Bookmark"].x() > panel.buttons["Purple"].x()
+
+
+def test_dragging_a_photo_starts_a_drag_not_a_box_selection(window, monkeypatch):
+    """Regression: setMovement(Static) silently disabled dragging, so a drag became
+    a rubber-band selection."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication as App
+
+    win, folder, _ = window
+    grid = win.grid
+    assert grid.dragEnabled()
+    path = str(folder / "vacation.jpg")
+    grid.select_paths([path], current=path)
+    started = []
+    monkeypatch.setattr(type(grid), "startDrag", lambda self, actions: started.append(self.selected_paths()))
+    rect = grid.visualRect(win.model.index(win.model.row_of(path)))
+    start = rect.center()
+    QTest.mousePress(grid.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    for step in range(1, 6):
+        QTest.mouseMove(grid.viewport(), start + QPoint(step * (App.startDragDistance() + 5), 0))
+    QTest.mouseRelease(grid.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                       start + QPoint(80, 0))
+    assert started == [[path]]

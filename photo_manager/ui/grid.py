@@ -607,15 +607,17 @@ class ThumbGrid(QListView):
 
     def __init__(self, model: PhotoModel, parent=None):  # type: ignore[no-untyped-def]
         super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setModel(model)
         self.delegate = ThumbDelegate(self)
         self.setItemDelegate(self.delegate)
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)
+        # Must come AFTER setMovement(Static): Qt switches dragging off when movement is Static,
+        # which turned a drag into a rubber-band selection.
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setUniformItemSizes(False)  # group headers are full width
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setLayoutMode(QListView.LayoutMode.Batched)

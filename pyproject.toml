@@ -1,6 +1,6 @@
 [project]
 name = "photo-manager"
-version = "0.7.3"
+version = "0.7.4"
 description = "A simple Windows photo browser for fixing dates, adding keywords and color labels."
 requires-python = ">=3.11"
 dependencies = ["PySide6>=6.7,<7", "Pillow>=11.2", "pillow-heif>=0.18", "send2trash>=1.8"]
