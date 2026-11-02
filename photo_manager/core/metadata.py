@@ -22,6 +22,7 @@ READ_TAGS = [
     "-XMP:Subject",
     "-XMP:Label",
     "-XMP:Rating",
+    "-XMP-xmpDM:Good",
     "-Composite:ImageSize",
 ]
 
@@ -50,7 +51,12 @@ class Meta:
     keywords: list[str] = field(default_factory=list)
     label: str = ""
     rating: int = 0
+    bookmarked: bool = False
     image_size: str = ""
+
+    @property
+    def starred(self) -> bool:
+        return self.rating > 0
 
 
 def parse_exif_date(value: object) -> datetime | None:
@@ -98,6 +104,7 @@ def parse_meta(data: dict) -> Meta:
         meta.rating = int(data.get("XMP:Rating") or 0)
     except (TypeError, ValueError):
         meta.rating = 0
+    meta.bookmarked = str(data.get("XMP:Good", "")).strip().lower() in ("true", "1")
     meta.image_size = str(data.get("Composite:ImageSize") or "").replace(" ", "x")
     return meta
 
@@ -145,3 +152,23 @@ def keyword_args(path: str, add: list[str] = (), remove: list[str] = ()) -> list
 
 def label_args(label: str) -> list[str]:
     return ["-P", f"-XMP-xmp:Label={label}"]
+
+
+# Star and Bookmark are on/off flags, independent of the color label.
+# Star is stored as a 5-star rating (Windows Explorer, Lightroom and Bridge show it);
+# Bookmark uses the XMP "Good" flag (xmpDM:good), which other apps generally ignore.
+FLAGS = ("Star", "Bookmark")
+
+
+def flag_args(flag: str, on: bool) -> list[str]:
+    if flag == "Star":
+        return ["-P", "-XMP-xmp:Rating=5" if on else "-XMP-xmp:Rating="]
+    if flag == "Bookmark":
+        return ["-P", "-XMP-xmpDM:Good=True" if on else "-XMP-xmpDM:Good="]
+    raise ValueError(flag)
+
+
+def has_flag(meta: "Meta | None", flag: str) -> bool:
+    if meta is None:
+        return False
+    return meta.starred if flag == "Star" else meta.bookmarked

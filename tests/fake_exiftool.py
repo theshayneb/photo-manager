@@ -13,6 +13,8 @@ VALUE_OPTIONS = {"-charset", "-api", "-echo4", "-stay_open", "-@", "-common_args
 TAG_MAP = {
     "XMP-dc:Subject": "XMP:Subject",
     "XMP-xmp:Label": "XMP:Label",
+    "XMP-xmp:Rating": "XMP:Rating",
+    "XMP-xmpDM:Good": "XMP:Good",
     "FileCreateDate": "File:FileCreateDate",
     "FileModifyDate": "File:FileModifyDate",
 }

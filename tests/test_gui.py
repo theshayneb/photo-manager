@@ -618,3 +618,131 @@ def test_convert_dialog_counts(qapp, tmp_path):
     dlg.target.setCurrentText("PNG")
     assert dlg.to_convert() == ["a.heic", "b.webp", "c.jpg"]
     assert not dlg.quality.isEnabled()
+
+
+def _drop_event(widget, pos, paths, ctrl=False):
+    from PySide6.QtCore import QMimeData, QPointF, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+    mods = Qt.KeyboardModifier.ControlModifier if ctrl else Qt.KeyboardModifier.NoModifier
+    return QDropEvent(QPointF(pos), Qt.DropAction.MoveAction | Qt.DropAction.CopyAction, mime,
+                      Qt.MouseButton.LeftButton, mods), mime
+
+
+def test_drop_photos_on_a_favorite_moves_them(window, tmp_path):
+    win, folder, _ = window
+    dest = tmp_path / "Keepers"
+    dest.mkdir()
+    win.toggle_favorite(str(dest))
+    QApplication.processEvents()
+    item = win.favorites.item(0)
+    pos = win.favorites.visualItemRect(item).center()
+    got = []
+    win.favorites.files_dropped.connect(lambda paths, f, copy: got.append((paths, f, copy)))
+    event, _mime = _drop_event(win.favorites, pos, [folder / "vacation.jpg"])
+    win.favorites.dropEvent(event)
+    assert got and got[0][1] == str(dest) and got[0][2] is False
+    settle(win)
+    assert (dest / "vacation.jpg").exists() and not (folder / "vacation.jpg").exists()
+    assert win.model.item(str(folder / "vacation.jpg")) is None
+
+    # Ctrl+drop copies.
+    event, _mime = _drop_event(win.favorites, pos, [folder / "Screenshot_20261023-143414.png"], ctrl=True)
+    win.favorites.dropEvent(event)
+    settle(win)
+    assert (dest / "Screenshot_20261023-143414.png").exists()
+    assert (folder / "Screenshot_20261023-143414.png").exists()
+
+
+def test_drop_on_folder_tree_moves(window, tmp_path):
+    win, folder, _ = window
+    from photo_manager.ui.folders import FolderTree
+
+    dest = tmp_path / "Sorted"
+    dest.mkdir()
+    tree = win.tree
+    assert isinstance(tree, FolderTree)
+    tree.folder_at = lambda pos: str(dest)  # the real tree loads drives asynchronously
+    event, _mime = _drop_event(tree, tree.rect().center(), [folder / "vacation.jpg"])
+    tree.dropEvent(event)
+    settle(win)
+    assert (dest / "vacation.jpg").exists()
+
+
+def test_grid_items_are_draggable(window):
+    win, folder, _ = window
+    row = win.model.row_of(str(folder / "vacation.jpg"))
+    assert win.model.flags(win.model.index(row)) & Qt.ItemFlag.ItemIsDragEnabled
+
+
+def test_star_and_bookmark_toggle_independently_of_color(window):
+    win, folder, et = window
+    select(win, "vacation.jpg")
+    win._label_shortcut("Red")
+    settle(win)
+    win._flag_shortcut("Star")
+    settle(win)
+    win._flag_shortcut("Bookmark")
+    settle(win)
+    meta = meta_of(et, folder / "vacation.jpg")
+    assert meta.label == "Red" and meta.starred and meta.bookmarked
+    assert win.sidebar.labels.flag_buttons["Star"].isChecked()
+    win._flag_shortcut("Star")  # again -> off
+    settle(win)
+    meta = meta_of(et, folder / "vacation.jpg")
+    assert not meta.starred and meta.bookmarked and meta.label == "Red"
+    assert win.sidebar.sections["labels"].header.text() == "Labels"
+
+
+def test_label_hotkeys_are_configurable(window, monkeypatch):
+    win, _, _ = window
+    from photo_manager.ui import main_window
+
+    keys = {s.key().toString() for s in win.label_shortcuts}
+    assert {"Ctrl+1", "Ctrl+0", "Ctrl+S", "Ctrl+B"} <= keys
+
+    class FakeHotkeys:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return True
+
+        def hotkeys(self):
+            return {"Red": "R", "Star": "Ctrl+8", "Bookmark": ""}
+
+    monkeypatch.setattr(main_window, "HotkeyDialog", FakeHotkeys)
+    win.edit_label_hotkeys()
+    keys = {s.key().toString() for s in win.label_shortcuts}
+    assert keys == {"R", "Ctrl+8"}
+    assert "(Ctrl+8)" in win.sidebar.labels.flag_buttons["Star"].toolTip()
+
+
+def test_hotkey_dialog_rejects_clashes(qapp):
+    from PySide6.QtGui import QKeySequence
+
+    from photo_manager.core.settings import DEFAULT_LABEL_HOTKEYS
+    from photo_manager.ui.dialogs import HotkeyDialog
+
+    dlg = HotkeyDialog(DEFAULT_LABEL_HOTKEYS, DEFAULT_LABEL_HOTKEYS, {"Ctrl+M": "Move to"})
+    dlg.edits["Star"].setKeySequence(QKeySequence("Ctrl+1"))
+    dlg._accept()
+    assert "both" in dlg.error.text()
+    dlg.edits["Star"].setKeySequence(QKeySequence("Ctrl+M"))
+    dlg._accept()
+    assert "Move to" in dlg.error.text()
+    dlg._defaults()
+    assert dlg.hotkeys() == DEFAULT_LABEL_HOTKEYS
+
+
+def test_old_settings_get_new_label_hotkeys(tmp_path):
+    import json
+
+    from photo_manager.core.settings import Settings
+
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"label_hotkeys": {"Red": "F6"}}))
+    s = Settings.load(path)
+    assert s.label_hotkeys["Red"] == "F6" and s.label_hotkeys["Star"] == "Ctrl+S"

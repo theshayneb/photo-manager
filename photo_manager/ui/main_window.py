@@ -12,9 +12,9 @@ from PySide6.QtGui import (
     QAction, QActionGroup, QCloseEvent, QDesktopServices, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
-    QSlider, QSplitter, QStackedWidget, QToolBar, QTreeView, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDockWidget, QFileSystemModel, QLabel,
+    QLineEdit, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QScrollArea,
+    QSlider, QSplitter, QStackedWidget, QToolBar, QVBoxLayout, QWidget,
 )
 
 from ..core import dates, fileops
@@ -25,10 +25,11 @@ from ..core.winshell import open_with, show_properties
 from ..core.exiftool import ExifTool
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
-from .dialogs import ConvertDialog, MoveDialog, RenameDialog, TemplateDialog
+from .dialogs import ConvertDialog, HotkeyDialog, MoveDialog, RenameDialog, TemplateDialog
 from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
 from .panels import PANELS, Sidebar
 from .theme import THEMES, apply_theme
+from .folders import FavoritesList, FolderTree
 from .preview import PreviewPane
 from .viewer import Viewer
 from .workers import Background
@@ -43,6 +44,10 @@ QPushButton[keyword="true"][state="all"] {
     background-color: palette(highlight); color: palette(highlighted-text); border-color: palette(highlight); }
 QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); padding: 1px 3px; }
 QPushButton[chip="true"] { padding: 2px 8px; }
+QPushButton[flag="true"] { padding: 2px 8px; border: 1px solid palette(mid); border-radius: 3px;
+    background-color: palette(button); }
+QPushButton[flag="true"]:checked { background-color: palette(highlight); color: palette(highlighted-text);
+    border-color: palette(highlight); font-weight: bold; }
 QLabel[hint="true"] { color: gray; }
 QToolButton[section="true"] { font-weight: bold; text-align: left; padding: 4px; border: none;
     border-bottom: 1px solid palette(mid); }
@@ -76,6 +81,7 @@ class MainWindow(QMainWindow):
         self.grid.delegate.show_type_badges = settings.type_badges
         self.grid.selectionModel().selectionChanged.connect(lambda *_: self._schedule_refresh())
         self.grid.activated.connect(lambda _idx: self.open_viewer())
+        self.grid.drag_finished.connect(self._drag_finished)
         self.grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.grid.customContextMenuRequested.connect(self._grid_menu)
         self.preview = PreviewPane(settings)
@@ -124,7 +130,8 @@ class MainWindow(QMainWindow):
         self.fs_model = QFileSystemModel(self)
         self.fs_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot | QDir.Filter.Drives)
         self.fs_model.setRootPath("")
-        self.tree = QTreeView()
+        self.tree = FolderTree()
+        self.tree.files_dropped.connect(self.move_paths)
         self.tree.setModel(self.fs_model)
         for col in (1, 2, 3):
             self.tree.hideColumn(col)
@@ -135,13 +142,13 @@ class MainWindow(QMainWindow):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._tree_menu)
 
-        self.favorites = QListWidget()
-        self.favorites.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.favorites = FavoritesList()
+        self.favorites.files_dropped.connect(self.move_paths)
         self.favorites.itemClicked.connect(lambda item: self.open_folder(item.data(Qt.ItemDataRole.UserRole)))
         self.favorites.model().rowsMoved.connect(lambda *_: self._save_favorite_order())
         self.favorites.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites.customContextMenuRequested.connect(self._favorites_menu)
-        self.favorites.setToolTip("Right-click a folder in the tree → Add to Favorites. Drag to reorder.")
+        self.favorites.setToolTip("Right-click a folder in the tree → Add to Favorites. Drag to reorder. Drop photos here to move them.")
         self._fill_favorites()
 
         def titled(title: str, widget: QWidget) -> QWidget:
@@ -282,6 +289,7 @@ class MainWindow(QMainWindow):
         select_misnamed = view.addAction("Select files that need renaming")
         select_misnamed.setShortcut(QKeySequence("Ctrl+Shift+R"))
         select_misnamed.triggered.connect(self.select_misnamed)
+        view.addAction("Label hotkeys…", self.edit_label_hotkeys)
         view.addSeparator()
         info = view.addMenu("Show under thumbnails")
         for key, title in INFO_FIELDS.items():
@@ -321,11 +329,8 @@ class MainWindow(QMainWindow):
     def _build_shortcuts(self) -> None:
         delete = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.grid)
         delete.activated.connect(self.delete_selected)
-        for n, label in enumerate(LABELS, start=1):
-            sc = QShortcut(QKeySequence(f"Ctrl+{n}"), self)
-            sc.activated.connect(lambda name=label: self._label_shortcut(name))
-        clear = QShortcut(QKeySequence("Ctrl+0"), self)
-        clear.activated.connect(lambda: self._label_shortcut(""))
+        self.label_shortcuts: list[QShortcut] = []
+        self._build_label_shortcuts()
         for keys, slot in (("F2", self.rename_current), ("Ctrl+C", self.copy_files)):
             sc = QShortcut(QKeySequence(keys), self.grid)
             sc.setContext(Qt.ShortcutContext.WidgetShortcut)
@@ -333,6 +338,44 @@ class MainWindow(QMainWindow):
         preview = QShortcut(QKeySequence("Shift+P"), self.grid)
         preview.setContext(Qt.ShortcutContext.WidgetShortcut)
         preview.activated.connect(self.open_preview)
+
+    # Keys the app already uses; label hotkeys can't take these.
+    RESERVED_KEYS = {
+        "Ctrl+M": "Move to", "Ctrl+E": "Show in Explorer", "Ctrl+O": "Open", "Ctrl+D": "Favorite folder",
+        "Ctrl+C": "Copy", "Ctrl+A": "Select all", "F2": "Rename", "F5": "Refresh", "F9": "Sidebar",
+        "Shift+P": "Preview", "Ctrl+Shift+R": "Select files that need renaming", "Del": "Delete",
+        "Alt+Up": "Parent folder",
+    }
+
+    def _build_label_shortcuts(self) -> None:
+        for sc in self.label_shortcuts:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self.label_shortcuts = []
+        actions = {label: (lambda name=label: self._label_shortcut(name)) for label in LABELS}
+        actions["None"] = lambda: self._label_shortcut("")
+        actions["Star"] = lambda: self._flag_shortcut("Star")
+        actions["Bookmark"] = lambda: self._flag_shortcut("Bookmark")
+        for name, slot in actions.items():
+            keys = self.settings.label_hotkeys.get(name, "")
+            if keys:
+                sc = QShortcut(QKeySequence(keys), self)
+                sc.activated.connect(slot)
+                self.label_shortcuts.append(sc)
+
+    def edit_label_hotkeys(self) -> None:
+        from ..core.settings import DEFAULT_LABEL_HOTKEYS
+
+        dlg = HotkeyDialog(self.settings.label_hotkeys, DEFAULT_LABEL_HOTKEYS, self.RESERVED_KEYS, self)
+        if dlg.exec():
+            self.settings.label_hotkeys = dlg.hotkeys()
+            self.settings.save()
+            self._build_label_shortcuts()
+            self.sidebar.labels.update_tooltips()
+
+    def _flag_shortcut(self, flag: str) -> None:
+        self.refresh_sidebar()
+        self.sidebar.labels.toggle_flag(flag)
 
     # -------------------------------------------------------------- options
 
@@ -718,18 +761,44 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Move", f"Folder not found:\n{folder}")
             return
         self.settings.remember_move_folder(folder)
+        self.move_paths(paths, folder)
+
+    def move_paths(self, paths: list[str], folder: str, copy: bool = False) -> None:
+        """Move (or copy) files into folder, never overwriting; updates the grid."""
+        here = os.path.normcase(os.path.normpath(self.model.folder or ""))
+        if not copy and os.path.normcase(os.path.normpath(folder)) == here:
+            self.status.setText("Those files are already in this folder.")
+            return
+        verb = "Copied" if copy else "Moved"
 
         def done(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
             if error:
-                QMessageBox.warning(self, "Move", error)
+                QMessageBox.warning(self, verb, error)
                 return
-            moved, failures = result
-            self._after_removal(list(moved))
-            self.status.setText(f"Moved {len(moved)} file(s) to {folder}")
+            changed, failures = result
+            if copy:
+                if os.path.normcase(os.path.normpath(folder)) == here:
+                    for new in changed.values():
+                        self.model.add_path(new)
+                    self.regroup()
+                    self._show_count()
+            else:
+                self._after_removal(list(changed))
+            self.status.setText(f"{verb} {len(changed)} file(s) to {folder}")
             if failures:
-                QMessageBox.warning(self, "Move", "\n".join(f"{p}: {e}" for p, e in failures[:10]))
+                QMessageBox.warning(self, verb, "\n".join(f"{p}: {e}" for p, e in failures[:10]))
 
-        self.bg.run(lambda: fileops.move(paths, folder), done)
+        work = fileops.copy if copy else fileops.move
+        self.bg.run(lambda: work(paths, folder), done)
+
+    def _drag_finished(self, paths: list[str]) -> None:
+        """After dragging out to Explorer, drop files that were moved away from the grid."""
+        def check() -> None:
+            gone = [p for p in paths if not os.path.exists(p) and self.model.item(p)]
+            if gone:
+                self._after_removal(gone)
+
+        QTimer.singleShot(1500, check)
 
     def rename_files(self, plan: dict[str, str]) -> None:
         def done(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
@@ -852,12 +921,24 @@ class MainWindow(QMainWindow):
         add("Crop…", self.crop_current, "", single and item.kind == "image" and can_crop(item.path))
         add("Convert to JPG…", self.convert_selected, "",
             any(needs_conversion(p, "JPG") for p in paths))
-        labels = menu.addMenu("Color label")
-        for n, label in enumerate(LABELS, start=1):
-            action = labels.addAction(label, lambda name=label: self._label_shortcut(name))
-            action.setShortcut(QKeySequence(f"Ctrl+{n}"))
-            action.setShortcutVisibleInContextMenu(True)
-        labels.addAction("None", lambda: self._label_shortcut(""))
+        labels = menu.addMenu("Labels")
+        keys = self.settings.label_hotkeys
+        entries = [(label, label, lambda name=label: self._label_shortcut(name)) for label in LABELS]
+        entries.append(("None", "No color", lambda: self._label_shortcut("")))
+        entries.append(None)
+        entries.append(("Star", "★ Star", lambda: self._flag_shortcut("Star")))
+        entries.append(("Bookmark", "🔖 Bookmark", lambda: self._flag_shortcut("Bookmark")))
+        for entry in entries:
+            if entry is None:
+                labels.addSeparator()
+                continue
+            name, text, slot = entry
+            action = labels.addAction(text, slot)
+            if keys.get(name):
+                action.setShortcut(QKeySequence(keys[name]))
+                action.setShortcutVisibleInContextMenu(True)
+        labels.addSeparator()
+        labels.addAction("Hotkeys…", self.edit_label_hotkeys)
         labels.setEnabled(self.exiftool_ok)
         menu.addSeparator()
         add("Copy", self.copy_files, "Ctrl+C")

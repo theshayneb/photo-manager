@@ -55,6 +55,20 @@ def move(paths: list[str], folder: str) -> tuple[dict[str, str], list[tuple[str,
     return moved, failures
 
 
+def copy(paths: list[str], folder: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Copy files into folder (never overwriting). Returns ({old: new}, [(path, error)])."""
+    copied: dict[str, str] = {}
+    failures = []
+    for path in paths:
+        try:
+            dest = unique_path(Path(folder) / Path(path).name)
+            shutil.copy2(path, dest)
+            copied[path] = str(dest)
+        except OSError as exc:
+            failures.append((path, str(exc)))
+    return copied, failures
+
+
 INVALID_NAME_CHARS = set('<>:"/\\|?*')
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Drag photos from the grid onto a folder in the Folders tree or Favorites to move them (Ctrl to copy).
+  Hovering a folder while dragging expands it.
+- "Color label" panel is now **Labels**, with ★ Star and 🔖 Bookmark (on/off, alongside the color), shown on
+  thumbnails. Star is saved as a 5-star rating; Bookmark as the XMP "good" flag.
+- Hotkeys for every label can be changed (Labels → Hotkeys…). Defaults: Ctrl+1–5 colors, Ctrl+0 none,
+  Ctrl+S Star, Ctrl+B Bookmark.
+
 ## 0.6.0
 
 - Rename panel shows a File → New name list (with the exact final names, including `_1` for duplicates).

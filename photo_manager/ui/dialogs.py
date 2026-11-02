@@ -414,3 +414,65 @@ class ConvertDialog(QDialog):
         self.settings.convert_quality = self.quality.value()
         self.settings.convert_recycle = self.recycle.isChecked()
         self.accept()
+
+
+class HotkeyDialog(QDialog):
+    """Choose the keyboard shortcut for each label."""
+
+    NAMES = ["Red", "Yellow", "Green", "Blue", "Purple", "None", "Star", "Bookmark"]
+    TITLES = {"None": "No color (clear)", "Star": "★ Star", "Bookmark": "🔖 Bookmark"}
+
+    def __init__(self, hotkeys: dict[str, str], defaults: dict[str, str],
+                 reserved: dict[str, str] | None = None, parent: QWidget | None = None):
+        from PySide6.QtGui import QKeySequence
+        from PySide6.QtWidgets import QFormLayout, QKeySequenceEdit
+
+        super().__init__(parent)
+        self.setWindowTitle("Label hotkeys")
+        self.defaults = defaults
+        self.reserved = reserved or {}
+        self._seq = QKeySequence
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Click a box and press the keys you want. Clear a box to have no hotkey."))
+        form = QFormLayout()
+        self.edits = {}
+        for name in self.NAMES:
+            edit = QKeySequenceEdit(QKeySequence(hotkeys.get(name, "")))
+            edit.setMaximumSequenceLength(1)
+            edit.setClearButtonEnabled(True)
+            self.edits[name] = edit
+            form.addRow(self.TITLES.get(name, name) + ":", edit)
+        layout.addLayout(form)
+        self.error = QLabel()
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+                                   | QDialogButtonBox.StandardButton.RestoreDefaults)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(self._defaults)
+        layout.addWidget(buttons)
+
+    def _defaults(self) -> None:
+        for name, edit in self.edits.items():
+            edit.setKeySequence(self._seq(self.defaults.get(name, "")))
+
+    def hotkeys(self) -> dict[str, str]:
+        from PySide6.QtGui import QKeySequence
+
+        return {name: edit.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
+                for name, edit in self.edits.items()}
+
+    def _accept(self) -> None:
+        seen: dict[str, str] = {}
+        for name, keys in self.hotkeys().items():
+            if keys in self.reserved:
+                self.error.setText(f"<span style='color:#e5484d'>{keys} is already used for "
+                                   f"{self.reserved[keys]}.</span>")
+                return
+            if keys and keys in seen:
+                self.error.setText(f"<span style='color:#e5484d'>{keys} is used for both "
+                                   f"{seen[keys]} and {name}.</span>")
+                return
+            if keys:
+                seen[keys] = name
+        self.accept()

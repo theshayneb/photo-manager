@@ -6,7 +6,7 @@ A simple Windows 11 photo browser that does a few things well:
 - **Delete** to the Recycle Bin, **move** to a folder (with recent folders), **rename by date taken**.
 - **Fix "date taken"** by typing a date, shifting by hours/days, or **reading it from the filename** with templates.
 - **Keyword buttons**: one click adds or removes a keyword on every selected photo.
-- **Color labels** (red, yellow, green, blue, purple) as quick temporary tags.
+- **Labels**: a color (red, yellow, green, blue, purple) plus ★ Star and 🔖 Bookmark, each on its own hotkey.
 
 Everything is written **into the files** with [ExifTool](https://exiftool.org) (XMP, plus IPTC for JPEG/TIFF), so
 Windows Explorer, XnView, Lightroom and Bridge all see the same keywords, labels and dates.
@@ -33,7 +33,8 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Delete | **Delete** key (goes to the Recycle Bin) |
 | Right-click menu | Preview, View, Open, Open with…, **Rename… (F2)**, Crop…, Color label, Copy (**Ctrl+C**, paste in Explorer), Copy path, Move to…, Show in Explorer, Properties, Delete |
 | Move | **Ctrl+M**, then press **1–9** for a recent folder or **Browse…** |
-| Color label | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** none. Pressing the same label again removes it |
+| Labels | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** no color, **Ctrl+S** ★ Star, **Ctrl+B** 🔖 Bookmark. Pressing a label again removes it. Change any of these with **Hotkeys…** in the Labels panel (or View → Label hotkeys…) |
+| Move by dragging | Drag photos onto a folder in the **Folders** tree or **Favorites**. Hold **Ctrl** to copy instead. Hover over a folder to open it while dragging |
 | Show in Explorer / open in default app | **Ctrl+E** / **Ctrl+O** |
 | Refresh | **F5** |
 | Favorite folder | **Ctrl+D** or the ☆ button adds/removes the current folder; or right-click a folder in the tree |
@@ -121,6 +122,12 @@ from the list or type your own (patterns you use are added to the list). Also bu
 become `08-15-2026 11-42-44 AM.jpg` and `08-15-2026 11-42-44 AM_1.jpg`); nothing is ever overwritten.
 
 To rename a single file by hand, right-click it → **Rename…** or press **F2**.
+
+### Labels
+
+The **Labels** panel has the five colors (one per photo), **None**, and two on/off labels that work alongside
+the color: **★ Star** and **🔖 Bookmark**. They show on the thumbnails. Star is saved as a 5-star rating, so Windows
+Explorer and Lightroom see it too; Bookmark is only shown in this app.
 
 ## What can be written where
 

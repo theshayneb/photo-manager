@@ -32,6 +32,11 @@ def _default_keyword_sets() -> dict[str, list[str]]:
     }
 
 
+DEFAULT_LABEL_HOTKEYS = {
+    "Red": "Ctrl+1", "Yellow": "Ctrl+2", "Green": "Ctrl+3", "Blue": "Ctrl+4", "Purple": "Ctrl+5",
+    "None": "Ctrl+0", "Star": "Ctrl+S", "Bookmark": "Ctrl+B",
+}
+
 DEFAULT_RENAME_PATTERN = "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"  # 08-15-2026 11-42-44 AM
 
 DEFAULT_RENAME_PRESETS = [
@@ -69,6 +74,7 @@ class Settings:
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
     crop_as_copy: bool = False
+    label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"
     convert_quality: int = 92
     convert_recycle: bool = False
@@ -99,6 +105,8 @@ class Settings:
                 setattr(settings, key, value)
         settings._add_new_default_templates()
         settings._migrate()
+        for key, keys in DEFAULT_LABEL_HOTKEYS.items():  # labels added in later versions
+            settings.label_hotkeys.setdefault(key, keys)
         if not settings.keyword_sets:
             settings.keyword_sets = {"Keywords": []}
         if settings.current_keyword_set not in settings.keyword_sets:

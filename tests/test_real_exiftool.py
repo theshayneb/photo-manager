@@ -97,3 +97,18 @@ def test_convert_heic_to_jpg_keeps_metadata(et, tmp_path):
     assert meta.date_taken == DT and meta.keywords == ["josh"] and meta.label == "Blue"
     if sys.platform == "win32":
         assert meta.file_created == DT
+
+
+@pytest.mark.parametrize("name", ["star.jpg", "star.png", "star.heic"])
+def test_star_and_bookmark_round_trip(et, tmp_path, name):
+    from photo_manager.core.metadata import flag_args
+
+    path = make(tmp_path, name)
+    assert et.write(path, flag_args("Star", True)) is None
+    assert et.write(path, flag_args("Bookmark", True)) is None
+    meta = read(et, path)
+    assert meta.starred and meta.rating == 5 and meta.bookmarked
+    assert et.write(path, flag_args("Star", False)) is None
+    assert et.write(path, flag_args("Bookmark", False)) is None
+    meta = read(et, path)
+    assert not meta.starred and not meta.bookmarked

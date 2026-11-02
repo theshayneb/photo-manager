@@ -239,7 +239,7 @@ class PhotoModel(QAbstractListModel):
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if index.isValid() and isinstance(self.rows[index.row()], GroupHeader):
             return Qt.ItemFlag.NoItemFlags
-        return super().flags(index)
+        return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):  # type: ignore[override]
         if not index.isValid() or index.row() >= len(self.rows):
@@ -504,6 +504,8 @@ class ThumbDelegate(QStyledItemDelegate):
             painter.setPen(QColor("white"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "▶")
 
+        self._paint_flags(painter, target, item)
+
         if self.show_type_badges:
             label = type_label(item.path)
             if label:
@@ -546,6 +548,35 @@ class ThumbDelegate(QStyledItemDelegate):
                 y += INFO_LINE
         painter.restore()
 
+    def _paint_flags(self, painter: QPainter, target: QRect, item: Item) -> None:
+        """★ for Star, a ribbon for Bookmark, in the top-left corner of the thumbnail."""
+        meta = item.meta
+        if meta is None or not (meta.starred or meta.bookmarked):
+            return
+        x, y = target.left() + 4, target.top() + 4
+        painter.save()
+        if meta.starred:
+            circle = QRect(x, y, 20, 20)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 160))
+            painter.drawEllipse(circle)
+            painter.setPen(QColor("#facc15"))
+            font = QFont(painter.font())
+            font.setPixelSize(15)
+            painter.setFont(font)
+            painter.drawText(circle, Qt.AlignmentFlag.AlignCenter, "★")
+            x += 24
+        if meta.bookmarked:
+            from PySide6.QtCore import QPoint
+            from PySide6.QtGui import QPolygon
+
+            ribbon = QPolygon([QPoint(x + 2, y), QPoint(x + 16, y), QPoint(x + 16, y + 21),
+                               QPoint(x + 9, y + 15), QPoint(x + 2, y + 21)])
+            painter.setPen(QPen(QColor(0, 0, 0, 160), 1.5))
+            painter.setBrush(QColor("#38bdf8"))
+            painter.drawPolygon(ribbon)
+        painter.restore()
+
     def _paint_header(self, painter: QPainter, option, header: GroupHeader) -> None:
         painter.save()
         rect = option.rect.adjusted(4, 2, -4, -2)
@@ -572,8 +603,13 @@ class ThumbDelegate(QStyledItemDelegate):
 
 
 class ThumbGrid(QListView):
+    drag_finished = Signal(list)  # paths that were dragged
+
     def __init__(self, model: PhotoModel, parent=None):  # type: ignore[no-untyped-def]
         super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setModel(model)
         self.delegate = ThumbDelegate(self)
         self.setItemDelegate(self.delegate)
@@ -618,6 +654,25 @@ class ThumbGrid(QListView):
             model.set_collapsed(title, collapsed)
         self.apply_hidden()
         self.relayout()
+
+    def startDrag(self, supported_actions) -> None:  # type: ignore[no-untyped-def]
+        """Drag the selected files (onto a folder in the app, or out to Explorer)."""
+        from PySide6.QtCore import QMimeData, QUrl
+        from PySide6.QtGui import QDrag
+
+        paths = self.selected_paths()
+        if not paths:
+            return
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(p) for p in paths])
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        item = self.photo_model().item(self.current_path() or paths[0])
+        if item and item.thumb is not None:
+            drag.setPixmap(item.thumb.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio,
+                                             Qt.TransformationMode.SmoothTransformation))
+        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction, Qt.DropAction.MoveAction)
+        self.drag_finished.emit(paths)
 
     def selectAll(self) -> None:
         """Ctrl+A selects only what you can see (not photos in collapsed groups)."""

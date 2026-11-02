@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..core import dates
 from ..core.media import metadata_writable
-from ..core.metadata import LABELS, date_args, keyword_args, label_args
+from ..core.metadata import LABELS, date_args, flag_args, has_flag, keyword_args, label_args
 from ..core.templates import match_any
 from .flowlayout import FlowLayout
 from .grid import LABEL_COLORS, Item
@@ -34,6 +34,7 @@ class Controller(Protocol):
     def write_metadata(self, jobs: list[tuple[str, list[str]]], what: str) -> None: ...
     def rename_files(self, plan: dict[str, str]) -> None: ...
     def rename_pattern_changed(self) -> None: ...
+    def edit_label_hotkeys(self) -> None: ...
     def edit_templates(self) -> None: ...
 
 
@@ -120,16 +121,18 @@ class InfoPanel(QWidget):
 # --------------------------------------------------------------------------
 
 class LabelPanel(QWidget):
+    """Color label (one per photo) plus Star and Bookmark on/off flags."""
+
     def __init__(self, ctl: Controller):
         super().__init__()
         self.ctl = ctl
         self.items: list[Item] = []
-        row = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
         self.buttons: dict[str, QPushButton] = {}
-        for n, label in enumerate(LABELS, start=1):
+        for label in LABELS:
             btn = QPushButton()
             btn.setFixedSize(30, 20)
-            btn.setToolTip(f"{label}  (Ctrl+{n})")
             btn.setCheckable(True)
             color = LABEL_COLORS[label].name()
             btn.setStyleSheet(
@@ -138,16 +141,48 @@ class LabelPanel(QWidget):
             btn.clicked.connect(lambda _=False, name=label: self.apply(name))
             row.addWidget(btn)
             self.buttons[label] = btn
-        clear = QPushButton("None")
-        clear.setToolTip("Remove label  (Ctrl+0)")
-        clear.clicked.connect(lambda: self.apply(""))
-        row.addWidget(clear)
+        self.clear = QPushButton("None")
+        self.clear.clicked.connect(lambda: self.apply(""))
+        row.addWidget(self.clear)
+        layout.addLayout(row)
+
+        row = QHBoxLayout()
+        self.flag_buttons: dict[str, QPushButton] = {}
+        for flag, text in (("Star", "★ Star"), ("Bookmark", "🔖 Bookmark")):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setProperty("flag", True)
+            btn.clicked.connect(lambda _=False, f=flag: self.toggle_flag(f))
+            row.addWidget(btn)
+            self.flag_buttons[flag] = btn
+        row.addStretch(1)
+        hotkeys = QToolButton()
+        hotkeys.setText("Hotkeys…")
+        hotkeys.setToolTip("Choose the keyboard shortcut for each label")
+        hotkeys.clicked.connect(ctl.edit_label_hotkeys)
+        row.addWidget(hotkeys)
+        layout.addLayout(row)
+        self.update_tooltips()
+
+    def update_tooltips(self) -> None:
+        keys = self.ctl.settings.label_hotkeys
+
+        def tip(name: str, text: str) -> str:
+            return f"{text}  ({keys[name]})" if keys.get(name) else text
+
+        for label, btn in self.buttons.items():
+            btn.setToolTip(tip(label, label))
+        self.clear.setToolTip(tip("None", "Remove the color label"))
+        self.flag_buttons["Star"].setToolTip(tip("Star", "Star (saved as a 5-star rating)"))
+        self.flag_buttons["Bookmark"].setToolTip(tip("Bookmark", "Bookmark"))
 
     def refresh(self, items: list[Item]) -> None:
         self.items = items
         labels = {i.meta.label for i in items if i.meta}
         for label, btn in self.buttons.items():
             btn.setChecked(labels == {label})
+        for flag, btn in self.flag_buttons.items():
+            btn.setChecked(bool(items) and all(has_flag(i.meta, flag) for i in items))
         self.setEnabled(self.ctl.exiftool_ok and bool(_writable(items)))
 
     def apply(self, label: str) -> None:
@@ -159,6 +194,16 @@ class LabelPanel(QWidget):
             label = ""
         self.ctl.write_metadata([(i.path, label_args(label)) for i in targets],
                                 f"label {label or 'cleared'}")
+
+    def toggle_flag(self, flag: str) -> None:
+        targets = _writable(self.items)
+        if not targets:
+            self.refresh(self.items)
+            return
+        # Everyone has it -> remove from all; otherwise add to all.
+        on = not all(has_flag(i.meta, flag) for i in targets)
+        self.ctl.write_metadata([(i.path, flag_args(flag, on)) for i in targets],
+                                f"{flag.lower()} {'added' if on else 'removed'}")
 
 
 # --------------------------------------------------------------------------
@@ -730,7 +775,7 @@ class Section(QWidget):
 
 PANELS = {
     "info": "Preview",
-    "labels": "Color label",
+    "labels": "Labels",
     "keywords": "Keywords",
     "dates": "Date taken",
     "rename": "Rename",
