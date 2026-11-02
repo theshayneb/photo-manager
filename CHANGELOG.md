@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- Fixed: closing the app while thumbnails were still loading could crash it on exit. It now cancels and waits for
+  thumbnail work (and stops any playing video) before closing.
+
 ## 0.8.0
 
 - **Compare side by side**: select 2–4 photos and press Shift+P (or right-click → Compare). 2 or 3 sit side by

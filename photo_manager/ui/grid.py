@@ -360,6 +360,12 @@ class PhotoModel(QAbstractListModel):
         except OSError:
             pass
 
+    def shutdown(self, timeout_ms: int = 5000) -> None:
+        """Drop queued thumbnails and wait for the ones being made (called when closing)."""
+        self.generation += 1  # results that still arrive are ignored
+        self._pool.clear()
+        self._pool.waitForDone(timeout_ms)
+
     def add_path(self, path: str) -> Item | None:
         """Add a new file (e.g. a cropped copy). Callers regroup() afterwards."""
         k = kind(path)

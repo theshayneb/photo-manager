@@ -1206,6 +1206,8 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except OSError:
             pass
+        self.preview.stop_video()
+        self.model.shutdown()  # thumbnail threads must be finished before Qt is torn down
         self.bg.wait(10_000)
         if self.et:
             self.et.close()

@@ -986,3 +986,20 @@ def test_video_is_released_before_its_labels_are_written(window):
     assert meta_of(et, clip).starred
     assert win.preview.showing_video  # and shown again afterwards
     win.close_preview()
+
+
+def test_closing_waits_for_thumbnail_threads(qapp, tmp_path):
+    """Regression: closing while thumbnails were still loading could abort the app on exit."""
+    folder = tmp_path / "many"
+    folder.mkdir()
+    for n in range(60):
+        Image.new("RGB", (1600, 1200), (n * 4 % 255, 80, 120)).save(folder / f"p{n:02d}.jpg", quality=95)
+    settings = Settings.load(tmp_path / "s.json")
+    settings.last_folder = str(folder)
+    win = MainWindow(settings, ExifTool(FAKE_EXIFTOOL))
+    win.show()
+    QApplication.processEvents()
+    for item in win.model.items:  # queue every thumbnail at once
+        win.model._request_thumb(item)
+    win.close()  # straight away, while they're loading
+    assert win.model._pool.activeThreadCount() == 0
