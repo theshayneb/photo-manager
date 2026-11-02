@@ -6,7 +6,7 @@ A simple Windows 11 photo browser that does a few things well:
 - **Delete** to the Recycle Bin, **move** to a folder (with recent folders), **rename by date taken**.
 - **Fix "date taken"** by typing a date, shifting by hours/days, or **reading it from the filename** with templates.
 - **Keyword buttons**: one click adds or removes a keyword on every selected photo.
-- **Labels**: a color (red, yellow, green, blue, purple) plus ★ Star and 🔖 Bookmark, each on its own hotkey.
+- **Labels**: a color (red, yellow, green, blue, purple) plus ⭐ Star and 🔖 Bookmark, each on its own hotkey.
 
 Everything is written **into the files** with [ExifTool](https://exiftool.org) (XMP, plus IPTC for JPEG/TIFF), so
 Windows Explorer, XnView, Lightroom and Bridge all see the same keywords, labels and dates.
@@ -35,12 +35,19 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Delete | **Delete** key (goes to the Recycle Bin) |
 | Right-click menu | Preview, View, Open, Open with…, **Rename… (F2)**, Crop…, Color label, Copy (**Ctrl+C**, paste in Explorer), Copy path, Move to…, Show in Explorer, Properties, Delete |
 | Move | **Ctrl+M**, then press **1–9** for a recent folder or **Browse…** |
-| Labels | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+S** ★ Star, **Ctrl+B** 🔖 Bookmark, **Ctrl+0** None (removes all labels). Pressing a label again removes it. Change any of these with the **⌨** button in the Labels panel (or View → Label hotkeys…) |
+| Labels | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+S** ⭐ Star, **Ctrl+B** 🔖 Bookmark, **Ctrl+0** None (removes all labels). Pressing a label again removes it. Change any of these with the **⌨** button in the Labels panel (or View → Label hotkeys…) |
 | Move by dragging | Drag photos onto a folder in the **Folders** tree or **Favorites**. Hold **Ctrl** to copy instead. Hover over a folder to open it while dragging |
 | Show in Explorer / open in default app | **Ctrl+E** / **Ctrl+O** |
 | Refresh | **F5** |
 | Favorite folder | **Ctrl+D** or the ☆ button adds/removes the current folder; or right-click a folder in the tree |
 | Show/hide the sidebar | **F9** |
+
+### Filter
+
+The **Filter** button (after Sort and Group) shows only some photos. Tick any of: **File type** (the types in
+this folder), **Label** (Red…Purple, ⭐ Starred, 🔖 Bookmarked, No label), **Needs rename** (names not in your
+rename format) and **No keywords**. Ticks under one heading mean "any of these"; different headings must all
+match, e.g. *HEIC* + *Needs rename* = HEIC files that need renaming. **Clear filter** shows everything again.
 
 ### View menu
 
@@ -52,7 +59,7 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 
 - **Sidebar panels**: hide panels you don't use. Click a panel's title in the sidebar to collapse it.
 - **Show under thumbnails**: Date taken (on by default), dimensions, file size, keywords.
-- **Group by**: day, week or month taken, or color label (also in the toolbar). Weeks can start on Sunday or Monday,
+- **Group by**: day, week or month taken, label (colors plus ⭐/🔖) or file type (also in the toolbar). Weeks can start on Sunday or Monday,
   and show their week number (Sunday weeks: week 1 contains Jan 1; Monday weeks: ISO week numbers).
   **Click a group's header to collapse or expand it**; Ctrl+click selects everything in it. Right-click a header
   for Collapse all / Expand all. Ctrl+A and arrow keys skip collapsed groups.
@@ -128,7 +135,7 @@ To rename a single file by hand, right-click it → **Rename…** or press **F2*
 ### Labels
 
 The **Labels** panel has the five colors (one per photo), two on/off labels that work alongside the color,
-**★ Star** and **🔖 Bookmark**, and **None**, which removes all of them. They show on the thumbnails. Star is saved as a 5-star rating, so Windows
+**⭐ Star** and **🔖 Bookmark**, and **None**, which removes all of them. They show on the thumbnails. Star is saved as a 5-star rating, so Windows
 Explorer and Lightroom see it too; Bookmark is only shown in this app.
 
 ## What can be written where

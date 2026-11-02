@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0
+
+- **Filter** (toolbar, after Sort and Group): tick File types, Labels (colors, ⭐ Starred, 🔖 Bookmarked, No label),
+  Needs rename and/or No keywords. Ticks under one heading mean "any of these"; different headings must all match.
+  The status bar shows "N of M shown"; **Clear filter** shows everything again.
+- **Group: Label** (was Color label) now includes ⭐ and 🔖: one group per combination, e.g. "Red ⭐", "🔖", "No label".
+- **Group: File type** (JPG, PNG, HEIC, MP4…).
+- ⭐ is now the star emoji, and the bookmark on photos is the red 🔖 emoji, matching the Labels buttons.
+
 ## 0.8.3
 
 - Fixed: **Move to…** in the big preview could do nothing. Actions used the (hidden) grid selection; in the

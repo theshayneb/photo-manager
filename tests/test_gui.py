@@ -1106,3 +1106,89 @@ def test_move_in_preview_acts_on_the_shown_photo_even_if_nothing_is_selected(win
     assert win.model.item(path) is None  # gone from the grid too
     win.close_preview()
     assert path not in [i.path for i in win.model.items]
+
+
+def test_group_by_label_includes_star_and_bookmark(window):
+    win, folder, _ = window
+    select(win, "vacation.jpg")
+    win._label_shortcut("Red")
+    settle(win)
+    win._flag_shortcut("Star")
+    settle(win)
+    select(win, "Screenshot_20261023-143414.png")
+    win._flag_shortcut("Bookmark")
+    settle(win)
+    win.set_group("label")
+    assert headers(win) == ["Red  ⭐", "🔖", "No label"]
+    assert win.group_combo.currentText() == "Label"
+
+
+def test_group_by_file_type(window):
+    win, _, _ = window
+    win.set_group("type")
+    assert headers(win) == ["JPG", "PNG"]
+
+
+def _names(win):
+    return sorted(i.name for i in win.model.items)
+
+
+def test_filter_by_type_label_rename_and_keywords(window):
+    win, folder, et = window
+    select(win, "vacation.jpg")
+    win._flag_shortcut("Star")
+    settle(win)
+    win.sidebar.keywords.buttons["josh"].click()
+    settle(win)
+
+    win.filters["types"] = {"PNG"}
+    win.apply_filter()
+    assert _names(win) == ["Screenshot_20261023-143414.png"]
+    assert "1 of 3 shown" in win.status.text() and win.filter_btn.text() == "Filter (1)"
+
+    win.clear_filter()
+    win.filters["labels"] = {"Star"}
+    win.apply_filter()
+    assert _names(win) == ["vacation.jpg"]
+
+    win.clear_filter()
+    win.filters["no_keywords"] = True
+    win.apply_filter()
+    assert "vacation.jpg" not in _names(win) and len(_names(win)) == 2
+
+    # Across headings the conditions combine (AND): JPGs that have no keywords.
+    win.filters["types"] = {"JPG"}
+    win.apply_filter()
+    assert _names(win) == ["IMG_20261023_000100_358_3.jpg"]
+
+    win.clear_filter()
+    assert len(win.model.items) == 3 and win.filter_btn.text() == "Filter"
+
+
+def test_filter_needs_rename_and_menu(window):
+    win, folder, et = window
+    et.write(str(folder / "vacation.jpg"), ["-AllDates=2026:08:15 11:42:44"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg")
+    win.sidebar.rename.apply()
+    settle(win)
+    win.filters["needs_rename"] = True
+    win.apply_filter()
+    assert "08-15-2026 11-42-44 AM.jpg" not in _names(win) and len(_names(win)) == 2
+    # The menu lists the file types present and shows what's ticked.
+    win._fill_filter_menu()
+    texts = {a.text(): a.isChecked() for a in win.filter_menu.actions() if a.isCheckable()}
+    assert texts["Needs rename"] is True and texts["JPG"] is False and "PNG" in texts
+    assert "⭐ Starred" in texts and "No keywords" in texts
+
+
+def test_filtered_out_photos_still_get_their_labels_updated(window):
+    win, folder, et = window
+    win.filters["types"] = {"PNG"}
+    win.apply_filter()
+    hidden = win.model.item(str(folder / "vacation.jpg"))
+    assert hidden is not None and win.model.row_of(hidden.path) == -1
+    win.model.set_meta({hidden.path: parse_meta({"XMP:Label": "Green"})})
+    assert hidden.meta.label == "Green"
+    win.clear_filter()

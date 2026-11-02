@@ -420,7 +420,7 @@ class HotkeyDialog(QDialog):
     """Choose the keyboard shortcut for each label."""
 
     NAMES = ["Red", "Yellow", "Green", "Blue", "Purple", "Star", "Bookmark", "None"]
-    TITLES = {"None": "None (remove all labels)", "Star": "★ Star", "Bookmark": "🔖 Bookmark"}
+    TITLES = {"None": "None (remove all labels)", "Star": "⭐ Star", "Bookmark": "🔖 Bookmark"}
 
     def __init__(self, hotkeys: dict[str, str], defaults: dict[str, str],
                  reserved: dict[str, str] | None = None, parent: QWidget | None = None):

@@ -144,7 +144,7 @@ class LabelPanel(QWidget):
             self.buttons[label] = btn
         row.addSpacing(6)
         self.flag_buttons: dict[str, QPushButton] = {}
-        for flag, text in (("Star", "★"), ("Bookmark", "🔖")):
+        for flag, text in (("Star", "⭐"), ("Bookmark", "🔖")):
             btn = QPushButton(text)
             btn.setFixedSize(30, 22)  # icon only, like the color squares; the name is in the tooltip
             btn.setCheckable(True)

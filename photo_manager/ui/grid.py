@@ -38,7 +38,8 @@ GROUPS = {
     "day": "Day taken",
     "week": "Week taken",
     "month": "Month taken",
-    "label": "Color label",
+    "label": "Label",
+    "type": "File type",
 }
 
 # Extra lines that can be shown under each filename.
@@ -104,10 +105,16 @@ def group_key(item: Item, group_by: str, week_start: str) -> tuple[tuple, str]:
     """(sort key, header title) for an item under a grouping mode."""
     meta = item.meta
     if group_by == "label":
+        # One group per exact combination, e.g. "Red ⭐", "⭐ 🔖", "No label".
         label = meta.label if meta else ""
-        if label in LABELS:
-            return (LABELS.index(label),), label
-        return (len(LABELS),), "No label"
+        color = LABELS.index(label) if label in LABELS else len(LABELS)
+        star = bool(meta and meta.starred)
+        mark = bool(meta and meta.bookmarked)
+        parts = ([label] if color < len(LABELS) else []) + (["⭐"] if star else []) + (["🔖"] if mark else [])
+        return (color, not star, not mark), "  ".join(parts) or "No label"
+    if group_by == "type":
+        label = type_label(item.path)
+        return (item.kind == "video", label), label or "Other"
     dt = meta.date_taken if meta else None
     if dt is None:
         return ((1,), "No date taken")
@@ -144,8 +151,11 @@ class PhotoModel(QAbstractListModel):
 
     def __init__(self, cache_dir: Path | None = None, parent: QObject | None = None):
         super().__init__(parent)
-        self.items: list[Item] = []          # photos in display order
+        self.all_items: list[Item] = []      # every photo in the folder
+        self.items: list[Item] = []          # the ones shown (filtered), in display order
         self.rows: list[Item | GroupHeader] = []
+        self.filter_fn = None                # Item -> bool, or None for no filter
+        self._by_path: dict[str, Item] = {}
         self.folder = ""
         self.generation = 0
         self.sort_by = "name"
@@ -181,12 +191,14 @@ class PhotoModel(QAbstractListModel):
         except OSError:
             items = []
         self.folder = folder
-        self.items = items
+        self.all_items = items
         self.regroup()
 
     def regroup(self) -> None:
         """Re-sort and rebuild group headers (resets the view; callers restore selection)."""
         self.beginResetModel()
+        self._by_path = {os.path.normcase(i.path): i for i in self.all_items}
+        self.items = [i for i in self.all_items if self.filter_fn is None or self.filter_fn(i)]
         self._sort_items()
         rows: list[Item | GroupHeader] = []
         if self.group_by in GROUPS and self.group_by != "none":
@@ -216,7 +228,11 @@ class PhotoModel(QAbstractListModel):
         return self.group_by != "none"
 
     def needs_regroup_for_meta(self) -> bool:
-        return self.sort_by == "date" or self.group_by not in ("none",)
+        return self.sort_by == "date" or self.group_by not in ("none",) or self.filter_fn is not None
+
+    @property
+    def filtered(self) -> bool:
+        return self.filter_fn is not None
 
     def _sort_items(self) -> None:
         if self.sort_by == "date":
@@ -267,8 +283,8 @@ class PhotoModel(QAbstractListModel):
         return self._row_of.get(os.path.normcase(path), -1)
 
     def item(self, path: str) -> Item | None:
-        row = self.row_of(path)
-        return self.rows[row] if row >= 0 else None  # type: ignore[return-value]
+        """The photo with this path (also when the filter hides it)."""
+        return self._by_path.get(os.path.normcase(path))
 
     def item_at(self, row: int) -> Item | None:
         if 0 <= row < len(self.rows):
@@ -330,25 +346,27 @@ class PhotoModel(QAbstractListModel):
     def _on_thumb(self, path: str, generation: int, image: QImage | None) -> None:
         if generation != self.generation:
             return
-        row = self.row_of(path)
-        if row < 0:
+        item = self.item(path)
+        if item is None:
             return
-        item = self.rows[row]
-        assert isinstance(item, Item)
         if image is None or image.isNull():
             item.thumb_state = "failed"
         else:
             item.thumb = QPixmap.fromImage(image)
             item.thumb_state = "done"
-        self._changed(row)
+        row = self.row_of(path)
+        if row >= 0:
+            self._changed(row)
 
     def set_meta(self, metas: dict[str, Meta]) -> None:
         """Store metadata. Callers should regroup() afterwards if needs_regroup_for_meta()."""
         for path, meta in metas.items():
-            row = self.row_of(path)
-            if row >= 0:
-                self.rows[row].meta = meta  # type: ignore[union-attr]
-                self._changed(row)
+            item = self.item(path)
+            if item is not None:
+                item.meta = meta
+                row = self.row_of(path)
+                if row >= 0:
+                    self._changed(row)
 
     def refresh_file(self, path: str) -> None:
         item = self.item(path)
@@ -376,7 +394,8 @@ class PhotoModel(QAbstractListModel):
         except OSError:
             return None
         item = Item(path, k, st.st_size, st.st_mtime)
-        self.items.append(item)
+        self.all_items.append(item)
+        self._by_path[os.path.normcase(path)] = item
         return item
 
     def reload_thumb(self, path: str) -> None:
@@ -384,11 +403,12 @@ class PhotoModel(QAbstractListModel):
         item = self.item(path)
         if item:
             item.thumb, item.thumb_state = None, "none"
-            self._changed(self.row_of(path))
+            if self.row_of(path) >= 0:
+                self._changed(self.row_of(path))
 
     def remove_paths(self, paths: list[str]) -> None:
         gone = {os.path.normcase(p) for p in paths}
-        self.items = [i for i in self.items if os.path.normcase(i.path) not in gone]
+        self.all_items = [i for i in self.all_items if os.path.normcase(i.path) not in gone]
         self.regroup()
 
     def rename_paths(self, renames: dict[str, str]) -> None:
@@ -430,36 +450,39 @@ def paint_label_frame(painter: QPainter, target: QRect, meta: Meta | None, scale
     painter.restore()
 
 
+EMOJI_FAMILIES = ["Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji"]
+
+
+def emoji_font(pixel_size: int) -> QFont:
+    font = QFont()
+    font.setFamilies(EMOJI_FAMILIES)
+    font.setPixelSize(max(8, pixel_size))
+    return font
+
+
 def paint_flags(painter: QPainter, target: QRect, meta: Meta | None, scale: float = 1.0) -> None:
-    """★ for Star and a ribbon for Bookmark, in the top-left corner of the image."""
+    """⭐ for Star and 🔖 for Bookmark (the same emoji as the Labels buttons), top-left."""
     if meta is None or not (meta.starred or meta.bookmarked):
         return
-    from PySide6.QtCore import QPointF
-    from PySide6.QtGui import QPolygonF
+    from PySide6.QtCore import QRectF
 
+    icons = (["⭐"] if meta.starred else []) + (["🔖"] if meta.bookmarked else [])
     s = scale
-    x, y = target.left() + 4 * s, target.top() + 4 * s
+    size = 18 * s
+    pad = 3 * s
+    width = len(icons) * size + (len(icons) + 1) * pad
+    pill = QRectF(target.left() + 4 * s, target.top() + 4 * s, width, size + 2 * pad)
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    if meta.starred:
-        from PySide6.QtCore import QRectF
-
-        circle = QRectF(x, y, 20 * s, 20 * s)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 160))
-        painter.drawEllipse(circle)
-        painter.setPen(QColor("#facc15"))
-        font = QFont(painter.font())
-        font.setPixelSize(max(8, round(15 * s)))
-        painter.setFont(font)
-        painter.drawText(circle, Qt.AlignmentFlag.AlignCenter, "★")
-        x += 24 * s
-    if meta.bookmarked:
-        ribbon = QPolygonF([QPointF(x + 2 * s, y), QPointF(x + 16 * s, y), QPointF(x + 16 * s, y + 21 * s),
-                            QPointF(x + 9 * s, y + 15 * s), QPointF(x + 2 * s, y + 21 * s)])
-        painter.setPen(QPen(QColor(0, 0, 0, 160), 1.5 * s))
-        painter.setBrush(QColor("#38bdf8"))
-        painter.drawPolygon(ribbon)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(0, 0, 0, 140))  # dark backing so they show on any photo
+    painter.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
+    painter.setFont(emoji_font(round(size * 0.85)))
+    painter.setPen(QColor("white"))
+    x = pill.left() + pad
+    for icon in icons:
+        painter.drawText(QRectF(x, pill.top() + pad, size, size), Qt.AlignmentFlag.AlignCenter, icon)
+        x += size + pad
     painter.restore()
 
 

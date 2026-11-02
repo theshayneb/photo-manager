@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -53,7 +54,7 @@ from .dialogs import (
     TemplateDialog,
 )
 from .folders import FavoritesList, FolderTree
-from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid
+from .grid import GROUPS, INFO_FIELDS, Item, PhotoModel, ThumbGrid, type_label
 from .panels import PANELS, Sidebar
 from .preview import PreviewPane
 from .theme import THEMES, apply_theme
@@ -118,6 +119,7 @@ class MainWindow(QMainWindow):
         self.preview.crop_requested.connect(self.crop_file)
         self.preview.active_changed.connect(self._compare_active)
         self.compare_paths: list[str] = []
+        self.filters = {"types": set(), "labels": set(), "needs_rename": False, "no_keywords": False}
         self.stack = QStackedWidget()
         self.stack.addWidget(self.grid)
         self.stack.addWidget(self.preview)
@@ -265,6 +267,17 @@ class MainWindow(QMainWindow):
         self.group_combo.setCurrentIndex(max(0, self.group_combo.findData(self.model.group_by)))
         self.group_combo.currentIndexChanged.connect(lambda _i: self.set_group(self.group_combo.currentData()))
         bar.addWidget(self.group_combo)
+
+        bar.addWidget(QLabel("  "))
+        self.filter_btn = QToolButton()
+        self.filter_btn.setText("Filter")
+        self.filter_btn.setToolTip("Show only some photos: by file type, label, names that need renaming, "
+                                   "or photos without keywords")
+        self.filter_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.filter_menu = QMenu(self.filter_btn)
+        self.filter_menu.aboutToShow.connect(self._fill_filter_menu)
+        self.filter_btn.setMenu(self.filter_menu)
+        bar.addWidget(self.filter_btn)
 
         bar.addWidget(QLabel("  Size: "))
         slider = QSlider(Qt.Orientation.Horizontal)
@@ -534,10 +547,93 @@ class MainWindow(QMainWindow):
     def _show_count(self) -> None:
         n = len(self.model.items)
         text = f"{n} photo{'s' if n != 1 else ''} and video{'s' if n != 1 else ''}"
+        if self.model.filtered:
+            text = f"Filter on: {n} of {len(self.model.all_items)} shown"
         misnamed = len(self.misnamed_paths())
         if misnamed:
             text += f"   ·   ⚠ {misnamed} not in rename format (Ctrl+Shift+R selects them)"
         self.status.setText(text)
+
+    # -------------------------------------------------------------- filter
+
+    FILTER_LABELS = [("Red", "Red"), ("Yellow", "Yellow"), ("Green", "Green"), ("Blue", "Blue"),
+                     ("Purple", "Purple"), ("Star", "⭐ Starred"), ("Bookmark", "🔖 Bookmarked"),
+                     ("None", "No label")]
+
+    def _fill_filter_menu(self) -> None:
+        """Built each time it opens, so File type lists the types in this folder."""
+        menu = self.filter_menu
+        menu.clear()
+        f = self.filters
+
+        def toggle(key: str, value) -> None:  # type: ignore[no-untyped-def]
+            if isinstance(f[key], set):
+                f[key] ^= {value}
+            else:
+                f[key] = not f[key]
+            self.apply_filter()
+
+        def check(text: str, on: bool, slot) -> None:  # type: ignore[no-untyped-def]
+            action = menu.addAction(text, slot)
+            action.setCheckable(True)
+            action.setChecked(on)
+
+        menu.addSection("File type")
+        present = sorted({type_label(i.path) for i in self.model.all_items} | f["types"])
+        if not present:
+            menu.addAction("(no files)").setEnabled(False)
+        for label in present:
+            check(label, label in f["types"], lambda _c=False, v=label: toggle("types", v))
+        menu.addSection("Label")
+        for key, text in self.FILTER_LABELS:
+            check(text, key in f["labels"], lambda _c=False, v=key: toggle("labels", v))
+        menu.addSection("Other")
+        check("Needs rename", f["needs_rename"], lambda _c=False: toggle("needs_rename", None))
+        check("No keywords", f["no_keywords"], lambda _c=False: toggle("no_keywords", None))
+        menu.addSeparator()
+        clear = menu.addAction("Clear filter", self.clear_filter)
+        clear.setEnabled(self._filter_active())
+
+    def _filter_active(self) -> bool:
+        f = self.filters
+        return bool(f["types"] or f["labels"] or f["needs_rename"] or f["no_keywords"])
+
+    def clear_filter(self) -> None:
+        self.filters = {"types": set(), "labels": set(), "needs_rename": False, "no_keywords": False}
+        self.apply_filter()
+
+    def _passes_filter(self, item: Item) -> bool:
+        f = self.filters
+        meta = item.meta
+        if f["types"] and type_label(item.path) not in f["types"]:
+            return False
+        if f["labels"]:
+            label = meta.label if meta else ""
+            starred = bool(meta and meta.starred)
+            marked = bool(meta and meta.bookmarked)
+            wanted = f["labels"]
+            if not ((label and label in wanted) or ("Star" in wanted and starred)
+                    or ("Bookmark" in wanted and marked)
+                    or ("None" in wanted and not label and not starred and not marked)):
+                return False
+        if f["needs_rename"]:
+            regex = rename_pattern_regex(self.settings.rename_pattern)
+            if regex is None or follows_pattern(item.name, regex):
+                return False
+        if f["no_keywords"] and meta is not None and meta.keywords:
+            return False
+        return True
+
+    def apply_filter(self) -> None:
+        active = self._filter_active()
+        self.model.filter_fn = self._passes_filter if active else None
+        n = sum(len(v) if isinstance(v, set) else int(v) for v in self.filters.values())
+        self.filter_btn.setText(f"Filter ({n})" if active else "Filter")
+        self.filter_btn.setStyleSheet("QToolButton { color: palette(highlight); font-weight: bold; }"
+                                      if active else "")
+        self.regroup()
+        self._show_count()
+        self.refresh_sidebar()
 
     # --------------------------------------------------------- name format
 
@@ -545,6 +641,8 @@ class MainWindow(QMainWindow):
         regex = rename_pattern_regex(self.settings.rename_pattern) if self.settings.highlight_misnamed else None
         self.grid.delegate.name_regex = regex
         self.grid.viewport().update()
+        if getattr(self, "filters", {}).get("needs_rename"):
+            self.apply_filter()
         if hasattr(self, "status"):
             self._show_count()
 
@@ -995,7 +1093,7 @@ class MainWindow(QMainWindow):
         keys = self.settings.label_hotkeys
         entries = [(label, label, lambda name=label: self._label_shortcut(name)) for label in LABELS]
         entries.append(None)
-        entries.append(("Star", "★ Star", lambda: self._flag_shortcut("Star")))
+        entries.append(("Star", "⭐ Star", lambda: self._flag_shortcut("Star")))
         entries.append(("Bookmark", "🔖 Bookmark", lambda: self._flag_shortcut("Bookmark")))
         entries.append(None)
         entries.append(("None", "None (remove all labels)", self._clear_labels_shortcut))
