@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.5
+
+- The Shift+P preview shows the file-type badge, ★/🔖 and the color-label frame, like the grid.
+  They update immediately when you press a label hotkey while previewing (hidden while cropping).
+
 ## 0.7.4
 
 - Fixed: dragging photos did a box-selection instead of a drag, so they couldn't be dropped on a folder or

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from ..core import thumbs
 from ..core.crop import ASPECT_RATIOS, can_crop, upright_size
 from ..core.winthumb import shell_thumbnail
-from .grid import pil_to_qimage
+from .grid import paint_flags, paint_label_frame, paint_type_badge, pil_to_qimage
 
 HANDLE = 10  # px, grab distance for corners/edges
 
@@ -120,6 +120,8 @@ class CropCanvas(QWidget):
         target = self._target()
         if self.pixmap and not target.isEmpty():
             painter.drawPixmap(target, self.pixmap, QRectF(self.pixmap.rect()))
+            if not self.cropping:
+                self._paint_marks(painter, target)
         else:
             painter.setPen(self.palette().text().color())
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message or "No preview")
@@ -146,6 +148,22 @@ class CropCanvas(QWidget):
             painter.setPen(QColor("white"))
             painter.drawText(box.adjusted(6, 4, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                              f"{w} × {h}")
+
+    def set_marks(self, path: str, kind: str, meta, show_type: bool) -> None:  # type: ignore[no-untyped-def]
+        """What to draw on top of the photo: type badge, ★/🔖 and the color-label frame."""
+        self.mark_path, self.mark_kind, self.mark_meta, self.show_type = path, kind, meta, show_type
+        self.update()
+
+    def _paint_marks(self, painter: QPainter, target: QRectF) -> None:
+        if not getattr(self, "mark_path", ""):
+            return
+        rect = target.toRect()
+        scale = 1.6  # a bit bigger than in the grid
+        # Inside the photo's edge, so it isn't cut off when the photo fills the pane.
+        paint_label_frame(painter, rect.adjusted(5, 5, -5, -5), self.mark_meta, scale)
+        paint_flags(painter, rect, self.mark_meta, scale)
+        if self.show_type:
+            paint_type_badge(painter, rect, self.mark_path, self.mark_kind, self.font(), scale)
 
     # -- mouse --
 
@@ -320,7 +338,7 @@ class PreviewPane(QWidget):
     def cropping(self) -> bool:
         return self.canvas.cropping
 
-    def show_item(self, path: str, kind: str, caption: str) -> None:
+    def show_item(self, path: str, kind: str, caption: str, meta=None) -> None:  # type: ignore[no-untyped-def]
         self.path, self.kind = path, kind
         self.caption.setText(caption)
         self.cancel_crop()
@@ -336,7 +354,12 @@ class PreviewPane(QWidget):
                     pass
         message = "" if pixmap else "Can't preview this file"
         self.canvas.set_image(pixmap, full, message)
+        self.update_marks(meta)
         self.crop_btn.setEnabled(kind == "image" and can_crop(path) and pixmap is not None)
+
+    def update_marks(self, meta) -> None:  # type: ignore[no-untyped-def]
+        """Redraw the badges/labels (e.g. after a label hotkey) without reloading the image."""
+        self.canvas.set_marks(self.path, self.kind, meta, bool(getattr(self.settings, "type_badges", True)))
 
     def _ratio_value(self) -> float | None:
         value = ASPECT_RATIOS.get(self.ratio.currentText())

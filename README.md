@@ -27,7 +27,7 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Do this | How |
 |---|---|
 | Open a folder | Click it in the **Folders** tree, or type/paste a path in the address bar |
-| Quick preview (inside the window) | **Shift+P**. ← → to move, **C** to crop, **Shift+P** or **Esc** to close. The sidebar follows the photo you're looking at |
+| Quick preview (inside the window) | **Shift+P**. ← → to move, **C** to crop, **Shift+P** or **Esc** to close. The sidebar follows the photo you're looking at, and the photo shows its type badge and labels |
 | View big | Double-click or **Enter**. In the viewer: ← → to move, **Delete** to recycle, **Enter** to play a video, **Esc** to close |
 | Select | Click, Ctrl+click, Shift+click, **Ctrl+A** |
 | Delete | **Delete** key (goes to the Recycle Bin) |

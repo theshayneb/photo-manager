@@ -791,3 +791,25 @@ def test_dragging_a_photo_starts_a_drag_not_a_box_selection(window, monkeypatch)
     QTest.mouseRelease(grid.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
                        start + QPoint(80, 0))
     assert started == [[path]]
+
+
+def test_preview_shows_type_badge_and_labels(window):
+    win, folder, _ = window
+    path = str(folder / "vacation.jpg")
+    win.grid.select_paths([path], current=path)
+    win.open_preview()
+    canvas = win.preview.canvas
+    assert canvas.mark_path == path and canvas.show_type
+    assert canvas.mark_meta is None or not canvas.mark_meta.starred
+    # Pressing label hotkeys while previewing updates the marks straight away.
+    win._flag_shortcut("Star")
+    settle(win)
+    win._label_shortcut("Purple")
+    settle(win)
+    assert canvas.mark_meta.starred and canvas.mark_meta.label == "Purple"
+    assert "Purple" in win.preview.caption.text()
+    canvas.resize(400, 300)
+    canvas.grab()  # paints without errors
+    win._toggle_badges(False)
+    assert not canvas.show_type
+    win.close_preview()

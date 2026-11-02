@@ -411,6 +411,76 @@ def type_label(path: str) -> str:
     return {"JPEG": "JPG", "JPE": "JPG", "TIFF": "TIF", "HEIF": "HEIC"}.get(ext, ext)
 
 
+def paint_label_frame(painter: QPainter, target: QRect, meta: Meta | None, scale: float = 1.0) -> None:
+    """Colored frame around the image for its color label."""
+    color = LABEL_COLORS.get(meta.label if meta else "")
+    if color is None:
+        return
+    painter.save()
+    pad = round(2 * scale)
+    painter.setPen(QPen(color, 4 * scale))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(target.adjusted(-pad, -pad, pad, pad), 3 * scale, 3 * scale)
+    painter.restore()
+
+
+def paint_flags(painter: QPainter, target: QRect, meta: Meta | None, scale: float = 1.0) -> None:
+    """★ for Star and a ribbon for Bookmark, in the top-left corner of the image."""
+    if meta is None or not (meta.starred or meta.bookmarked):
+        return
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QPolygonF
+
+    s = scale
+    x, y = target.left() + 4 * s, target.top() + 4 * s
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if meta.starred:
+        from PySide6.QtCore import QRectF
+
+        circle = QRectF(x, y, 20 * s, 20 * s)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 160))
+        painter.drawEllipse(circle)
+        painter.setPen(QColor("#facc15"))
+        font = QFont(painter.font())
+        font.setPixelSize(max(8, round(15 * s)))
+        painter.setFont(font)
+        painter.drawText(circle, Qt.AlignmentFlag.AlignCenter, "★")
+        x += 24 * s
+    if meta.bookmarked:
+        ribbon = QPolygonF([QPointF(x + 2 * s, y), QPointF(x + 16 * s, y), QPointF(x + 16 * s, y + 21 * s),
+                            QPointF(x + 9 * s, y + 15 * s), QPointF(x + 2 * s, y + 21 * s)])
+        painter.setPen(QPen(QColor(0, 0, 0, 160), 1.5 * s))
+        painter.setBrush(QColor("#38bdf8"))
+        painter.drawPolygon(ribbon)
+    painter.restore()
+
+
+def paint_type_badge(painter: QPainter, target: QRect, path: str, kind: str, base_font: QFont,
+                     scale: float = 1.0) -> None:
+    """Colored file-type label (JPG, PNG, HEIC, MP4…) in the top-right corner of the image."""
+    label = type_label(path)
+    if not label:
+        return
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    font = QFont(base_font)
+    font.setBold(True)
+    font.setPointSizeF(max(6.5, base_font.pointSizeF() - 2) * scale)
+    painter.setFont(font)
+    width = painter.fontMetrics().horizontalAdvance(label) + round(10 * scale)
+    height = round(16 * scale)
+    badge = QRect(target.right() - width - round(3 * scale), target.top() + round(4 * scale), width, height)
+    color = QColor(VIDEO_TYPE_COLOR if kind == "video" else TYPE_COLORS.get(label, "#475569"))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawRoundedRect(badge, 3 * scale, 3 * scale)
+    painter.setPen(QColor("white"))
+    painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+    painter.restore()
+
+
 class ThumbDelegate(QStyledItemDelegate):
     def __init__(self, view: "ThumbGrid"):
         super().__init__(view)
@@ -490,11 +560,7 @@ class ThumbDelegate(QStyledItemDelegate):
             painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
             target = box
 
-        color = LABEL_COLORS.get(item.meta.label if item.meta else "")
-        if color is not None:
-            painter.setPen(QPen(color, 4))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(target.adjusted(-2, -2, 2, 2), 3, 3)
+        paint_label_frame(painter, target, item.meta)
 
         if item.kind == "video":
             badge = QRect(target.left() + 4, target.bottom() - 22, 26, 18)
@@ -504,23 +570,10 @@ class ThumbDelegate(QStyledItemDelegate):
             painter.setPen(QColor("white"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "▶")
 
-        self._paint_flags(painter, target, item)
+        paint_flags(painter, target, item.meta)
 
         if self.show_type_badges:
-            label = type_label(item.path)
-            if label:
-                small = QFont(option.font)
-                small.setBold(True)
-                small.setPointSizeF(max(6.5, option.font.pointSizeF() - 2))
-                painter.setFont(small)
-                width = painter.fontMetrics().horizontalAdvance(label) + 10
-                badge = QRect(target.right() - width - 3, target.top() + 4, width, 16)
-                color = QColor(VIDEO_TYPE_COLOR if item.kind == "video" else TYPE_COLORS.get(label, "#475569"))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(color)
-                painter.drawRoundedRect(badge, 3, 3)
-                painter.setPen(QColor("white"))
-                painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+            paint_type_badge(painter, target, item.path, item.kind, option.font)
 
         text_color = palette.highlightedText().color() if selected else palette.text().color()
         text_rect = QRect(rect.x() + 4, box.bottom() + 6, rect.width() - 8, 20)
@@ -546,35 +599,6 @@ class ThumbDelegate(QStyledItemDelegate):
                 painter.drawText(r, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                                  metrics.elidedText(line, Qt.TextElideMode.ElideRight, r.width()))
                 y += INFO_LINE
-        painter.restore()
-
-    def _paint_flags(self, painter: QPainter, target: QRect, item: Item) -> None:
-        """★ for Star, a ribbon for Bookmark, in the top-left corner of the thumbnail."""
-        meta = item.meta
-        if meta is None or not (meta.starred or meta.bookmarked):
-            return
-        x, y = target.left() + 4, target.top() + 4
-        painter.save()
-        if meta.starred:
-            circle = QRect(x, y, 20, 20)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 160))
-            painter.drawEllipse(circle)
-            painter.setPen(QColor("#facc15"))
-            font = QFont(painter.font())
-            font.setPixelSize(15)
-            painter.setFont(font)
-            painter.drawText(circle, Qt.AlignmentFlag.AlignCenter, "★")
-            x += 24
-        if meta.bookmarked:
-            from PySide6.QtCore import QPoint
-            from PySide6.QtGui import QPolygon
-
-            ribbon = QPolygon([QPoint(x + 2, y), QPoint(x + 16, y), QPoint(x + 16, y + 21),
-                               QPoint(x + 9, y + 15), QPoint(x + 2, y + 21)])
-            painter.setPen(QPen(QColor(0, 0, 0, 160), 1.5))
-            painter.setBrush(QColor("#38bdf8"))
-            painter.drawPolygon(ribbon)
         painter.restore()
 
     def _paint_header(self, painter: QPainter, option, header: GroupHeader) -> None:

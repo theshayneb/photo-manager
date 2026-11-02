@@ -543,6 +543,9 @@ class MainWindow(QMainWindow):
         self.settings.type_badges = on
         self.grid.delegate.show_type_badges = on
         self.grid.viewport().update()
+        if self.previewing:
+            item = self.model.item(self.preview.path)
+            self.preview.update_marks(item.meta if item else None)
 
     # ------------------------------------------------------------- convert
 
@@ -639,6 +642,7 @@ class MainWindow(QMainWindow):
         if metas:
             selected = self.grid.selected_paths()
             self.model.set_meta(metas)
+            self._refresh_preview_marks(metas)
             if self.model.needs_regroup_for_meta():
                 self.regroup(selected)
             if {_key(p) for p in selected} & {_key(p) for p in metas}:
@@ -1023,13 +1027,24 @@ class MainWindow(QMainWindow):
             parts.append(item.meta.label)
         return "   ·   ".join(parts)
 
+    def _refresh_preview_marks(self, metas: dict[str, Meta]) -> None:
+        """Labels changed while previewing: update the marks on the preview straight away."""
+        if not self.previewing:
+            return
+        path = self.preview.path
+        if any(_key(p) == _key(path) for p in metas):
+            item = self.model.item(path)
+            if item:
+                self.preview.update_marks(item.meta)
+                self.preview.caption.setText(self._caption(item))
+
     def _preview_show_current(self) -> None:
         path = self.grid.current_path()
         item = self.model.item(path) if path else None
         if not item:
             self.close_preview()
             return
-        self.preview.show_item(item.path, item.kind, self._caption(item))
+        self.preview.show_item(item.path, item.kind, self._caption(item), item.meta)
         self.refresh_sidebar()
 
     def _preview_step(self, delta: int) -> None:
