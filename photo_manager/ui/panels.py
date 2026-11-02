@@ -128,7 +128,8 @@ class LabelPanel(QWidget):
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
-        row = QHBoxLayout()
+        row = QHBoxLayout()  # everything on one row: colors, None, ★, 🔖, hotkeys
+        row.setSpacing(4)
         self.buttons: dict[str, QPushButton] = {}
         for label in LABELS:
             btn = QPushButton()
@@ -142,11 +143,10 @@ class LabelPanel(QWidget):
             row.addWidget(btn)
             self.buttons[label] = btn
         self.clear = QPushButton("None")
+        self.clear.setProperty("compact", True)
         self.clear.clicked.connect(lambda: self.apply(""))
         row.addWidget(self.clear)
-        layout.addLayout(row)
-
-        row = QHBoxLayout()
+        row.addSpacing(6)
         self.flag_buttons: dict[str, QPushButton] = {}
         for flag, text in (("Star", "★"), ("Bookmark", "🔖")):
             btn = QPushButton(text)
@@ -158,8 +158,9 @@ class LabelPanel(QWidget):
             self.flag_buttons[flag] = btn
         row.addStretch(1)
         hotkeys = QToolButton()
-        hotkeys.setText("Hotkeys…")
-        hotkeys.setToolTip("Choose the keyboard shortcut for each label")
+        hotkeys.setText("⌨")
+        hotkeys.setToolTip("Label hotkeys…")
+        hotkeys.setAutoRaise(True)
         hotkeys.clicked.connect(ctl.edit_label_hotkeys)
         row.addWidget(hotkeys)
         layout.addLayout(row)

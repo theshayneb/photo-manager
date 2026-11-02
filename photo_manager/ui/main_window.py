@@ -44,6 +44,7 @@ QPushButton[keyword="true"][state="all"] {
     background-color: palette(highlight); color: palette(highlighted-text); border-color: palette(highlight); }
 QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); padding: 1px 3px; }
 QPushButton[chip="true"] { padding: 2px 8px; }
+QPushButton[compact="true"] { padding: 1px 6px; min-width: 0px; }
 QPushButton[flag="true"] { padding: 0px; min-width: 28px; max-width: 28px; min-height: 20px; max-height: 20px;
     border: 1px solid palette(mid); border-radius: 4px; background-color: palette(button); font-size: 13px; }
 QPushButton[flag="true"]:checked { background-color: palette(highlight); color: palette(highlighted-text);

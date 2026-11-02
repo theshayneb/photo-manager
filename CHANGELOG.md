@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- Labels panel fits on one row: colors, a smaller None, ★, 🔖 and a ⌨ hotkeys button.
+
 ## 0.7.1
 
 - Star and Bookmark buttons in the Labels panel show just their icons (★ 🔖); hover for the name and hotkey.

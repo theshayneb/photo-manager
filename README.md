@@ -33,7 +33,7 @@ Explorer either, installing ffmpeg (`winget install Gyan.FFmpeg`) gives the app 
 | Delete | **Delete** key (goes to the Recycle Bin) |
 | Right-click menu | Preview, View, Open, Open with…, **Rename… (F2)**, Crop…, Color label, Copy (**Ctrl+C**, paste in Explorer), Copy path, Move to…, Show in Explorer, Properties, Delete |
 | Move | **Ctrl+M**, then press **1–9** for a recent folder or **Browse…** |
-| Labels | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** no color, **Ctrl+S** ★ Star, **Ctrl+B** 🔖 Bookmark. Pressing a label again removes it. Change any of these with **Hotkeys…** in the Labels panel (or View → Label hotkeys…) |
+| Labels | **Ctrl+1** red, **Ctrl+2** yellow, **Ctrl+3** green, **Ctrl+4** blue, **Ctrl+5** purple, **Ctrl+0** no color, **Ctrl+S** ★ Star, **Ctrl+B** 🔖 Bookmark. Pressing a label again removes it. Change any of these with the **⌨** button in the Labels panel (or View → Label hotkeys…) |
 | Move by dragging | Drag photos onto a folder in the **Folders** tree or **Favorites**. Hold **Ctrl** to copy instead. Hover over a folder to open it while dragging |
 | Show in Explorer / open in default app | **Ctrl+E** / **Ctrl+O** |
 | Refresh | **F5** |
