@@ -35,13 +35,17 @@ def isolated_appdata(tmp_path, monkeypatch):
 _exit_status: dict[str, int] = {}
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     _exit_status["code"] = int(exitstatus)
+    print(f"\n[conftest] session finished, pytest exit status {int(exitstatus)}", file=sys.stderr)
 
 
-@pytest.hookimpl(trylast=True)
+@pytest.hookimpl(tryfirst=True)
 def pytest_unconfigure(config):
-    if sys.platform == "win32" and "code" in _exit_status:
+    code = _exit_status.get("code")
+    print(f"[conftest] unconfigure, exiting with {code}", file=sys.stderr)
+    if sys.platform == "win32" and code is not None:
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(_exit_status["code"])
+        os._exit(code)

@@ -30,7 +30,11 @@ jobs:
       - name: Tests (including real ExifTool round trips)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -v
+        run: |
+          python -X faulthandler -m pytest -v -rA -W default
+          $code = $LASTEXITCODE
+          Write-Host "pytest process exit code: $code"
+          exit $code
 
       - name: Build exe
         shell: pwsh
