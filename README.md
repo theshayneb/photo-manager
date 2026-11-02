@@ -86,7 +86,8 @@ Built-in templates:
 | `IMG_{YYYY}{MM}{DD}_{HH}{mm}{ss}` | `IMG_20261023_000100_358_3.jpg` | |
 | `VID_{YYYY}{MM}{DD}_{HH}{mm}{ss}` | `VID_20261023_120000.mp4` | |
 | `Screenshot_{YYYY}{MM}{DD}-{HH}{mm}{ss}` | `Screenshot_20261023-143414.png` | |
-| `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` | `2026-10-23_14-34-14.jpg` | Files already renamed by this app |
+| `{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}` | `08-15-2026 11-42-44 AM.jpg` | Files renamed by this app |
+| `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` | `2026-10-23_14-34-14.jpg` | |
 | `{YYYY}{MM}{DD}{HH}{mm}{ss}` | `20261024084049_1.jpg` | Digits only |
 | `*{YYYY}{MM}{DD}?{HH}{mm}{ss}` | `anything 20261023-143414.jpg` | Catch-all |
 
@@ -99,10 +100,10 @@ Built-in templates:
 Choose which date to use: **Date taken** (EXIF DateTimeOriginal), **EXIF Create Date**, or the Windows
 Created/Modified date. The pattern uses the same placeholders plus `{name}` (the current name), e.g.
 `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` → `2026-10-23_14-34-14.jpg`.
-Pick a saved pattern from the list or type your own (patterns you use are added to the list). Built in:
-`{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}`, `{YYYY}{MM}{DD}{HH}{mm}{ss}` (e.g. `20261024084049`), `{YYYY}-{MM}-{DD} {name}`,
-and `{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}`. Name clashes get `_1`, `_2`… (so two photos from the same second
-become `20261024084049.jpg` and `20261024084049_1.jpg`); nothing is ever overwritten.
+The default is `{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}` → `08-15-2026 11-42-44 AM.jpg`. Pick another saved pattern
+from the list or type your own (patterns you use are added to the list). Also built in:
+`{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}`, `{YYYY}{MM}{DD}{HH}{mm}{ss}` (e.g. `20261024084049`) and `{YYYY}-{MM}-{DD} {name}`. Name clashes get `_1`, `_2`… (so two photos from the same second
+become `08-15-2026 11-42-44 AM.jpg` and `08-15-2026 11-42-44 AM_1.jpg`); nothing is ever overwritten.
 
 To rename a single file by hand, right-click it → **Rename…** or press **F2**.
 

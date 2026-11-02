@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Keyword buttons are equal-size boxes in a 3-column grid again (slightly shorter than before).
+- Renames default to `08-15-2026 11-42-44 AM` (`{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}`); existing settings switch over once.
+- New filename template so dates can be read back from names in that format.
+
 ## 0.4.0
 
 - Fixed: the **Edit…** button for filename templates did nothing (the dialog crashed while opening).

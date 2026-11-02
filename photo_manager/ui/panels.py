@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -439,6 +439,7 @@ class RenamePanel(QWidget):
 # --------------------------------------------------------------------------
 
 class KeywordPanel(QWidget):
+    COLUMNS = 3
 
     def __init__(self, ctl: Controller):
         super().__init__()
@@ -472,7 +473,11 @@ class KeywordPanel(QWidget):
         layout.addLayout(row)
 
         self.grid_host = QWidget()
-        self.grid = FlowLayout(self.grid_host, spacing=3)
+        self.grid = QGridLayout(self.grid_host)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(3)
+        for col in range(self.COLUMNS):
+            self.grid.setColumnStretch(col, 1)  # equal-width boxes
         layout.addWidget(self.grid_host)
 
         self.other_title = _hint("Also on the selection (click to remove):")
@@ -562,15 +567,21 @@ class KeywordPanel(QWidget):
     # -- buttons --
 
     def _build_buttons(self) -> None:
-        self.grid.clear()
+        while self.grid.count():
+            widget = self.grid.takeAt(0).widget()
+            if widget:
+                widget.deleteLater()
         self.buttons = {}
-        for kw in self.keyword_set:
+        for n, kw in enumerate(self.keyword_set):
             btn = QPushButton(kw)
             btn.setProperty("keyword", True)
+            btn.setToolTip(kw)
+            # Same size for every box; long names are clipped rather than widening the column.
+            btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _=False, k=kw: self.toggle(k))
             btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             btn.customContextMenuRequested.connect(lambda _pos, k=kw, b=btn: self._button_menu(k, b))
-            self.grid.addWidget(btn)
+            self.grid.addWidget(btn, n // self.COLUMNS, n % self.COLUMNS)
             self.buttons[kw.casefold()] = btn
         self.refresh(self.items)
 

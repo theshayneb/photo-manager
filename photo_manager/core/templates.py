@@ -142,6 +142,7 @@ DEFAULT_TEMPLATES = [
     FilenameTemplate("Phone photo (IMG_)", "IMG_{YYYY}{MM}{DD}_{HH}{mm}{ss}"),
     FilenameTemplate("Phone video (VID_)", "VID_{YYYY}{MM}{DD}_{HH}{mm}{ss}"),
     FilenameTemplate("Screenshot", "Screenshot_{YYYY}{MM}{DD}-{HH}{mm}{ss}"),
+    FilenameTemplate("Renamed by this app (08-15-2026 11-42-44 AM)", "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"),
     FilenameTemplate("Already renamed", "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"),
     FilenameTemplate("Digits only (YYYYMMDDHHMMSS)", "{YYYY}{MM}{DD}{HH}{mm}{ss}"),
     FilenameTemplate("Anything with YYYYMMDD_HHMMSS", "*{YYYY}{MM}{DD}?{HH}{mm}{ss}"),

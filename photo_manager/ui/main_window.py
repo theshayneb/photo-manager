@@ -34,12 +34,12 @@ from .workers import Background
 META_CHUNK = 100
 
 STYLE = """
-QPushButton[keyword="true"] { padding: 2px 8px; min-width: 0px; min-height: 18px;
-    border: 1px solid palette(mid); border-radius: 10px; background-color: palette(button); }
+QPushButton[keyword="true"] { padding: 2px 4px; min-width: 0px; min-height: 18px;
+    border: 1px solid palette(mid); border-radius: 3px; background-color: palette(button); }
 QPushButton[keyword="true"]:hover { border-color: palette(highlight); }
 QPushButton[keyword="true"][state="all"] {
     background-color: palette(highlight); color: palette(highlighted-text); border-color: palette(highlight); }
-QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); padding: 1px 7px; }
+QPushButton[keyword="true"][state="some"] { border: 2px dashed palette(highlight); padding: 1px 3px; }
 QPushButton[chip="true"] { padding: 2px 8px; }
 QLabel[hint="true"] { color: gray; }
 QToolButton[section="true"] { font-weight: bold; text-align: left; padding: 4px; border: none;

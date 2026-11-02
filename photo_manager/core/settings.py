@@ -32,11 +32,13 @@ def _default_keyword_sets() -> dict[str, list[str]]:
     }
 
 
+DEFAULT_RENAME_PATTERN = "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"  # 08-15-2026 11-42-44 AM
+
 DEFAULT_RENAME_PRESETS = [
+    DEFAULT_RENAME_PATTERN,
     "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}",
     "{YYYY}{MM}{DD}{HH}{mm}{ss}",
     "{YYYY}-{MM}-{DD} {name}",
-    "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}",
 ]
 
 
@@ -45,7 +47,7 @@ class Settings:
     last_folder: str = ""
     display_format: str = DEFAULT_DISPLAY_FORMAT
     set_file_dates: bool = True
-    rename_pattern: str = "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"
+    rename_pattern: str = DEFAULT_RENAME_PATTERN
     confirm_delete: bool = True
     thumb_size: int = 160
     sort_by: str = "name"
@@ -67,6 +69,7 @@ class Settings:
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
     crop_as_copy: bool = False
+    migrations: list[str] = field(default_factory=list)
     window_geometry: str = ""
     window_state: str = ""
 
@@ -90,11 +93,22 @@ class Settings:
             if type(default) is type(value) or key == "templates":
                 setattr(settings, key, value)
         settings._add_new_default_templates()
+        settings._migrate()
         if not settings.keyword_sets:
             settings.keyword_sets = {"Keywords": []}
         if settings.current_keyword_set not in settings.keyword_sets:
             settings.current_keyword_set = next(iter(settings.keyword_sets))
         return settings
+
+    def _migrate(self) -> None:
+        """One-time changes to existing settings when defaults change."""
+        if "rename-us-format" not in self.migrations:
+            # 0.5.0: the preferred rename format became "08-15-2026 11-42-44 AM".
+            if self.rename_pattern == "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}":
+                self.rename_pattern = DEFAULT_RENAME_PATTERN
+            self.rename_presets = [DEFAULT_RENAME_PATTERN] + [
+                p for p in self.rename_presets if p != DEFAULT_RENAME_PATTERN]
+            self.migrations.append("rename-us-format")
 
     def _add_new_default_templates(self) -> None:
         """Give existing users templates added in newer versions (once each)."""

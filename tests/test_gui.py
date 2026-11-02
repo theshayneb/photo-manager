@@ -132,11 +132,11 @@ def test_rename_by_date(window):
     win.sidebar.dates.apply_filename()
     settle(win)
     select(win, "IMG_20261023_000100_358_3.jpg")
-    assert "2026-10-23_00-01-00.jpg" in win.sidebar.rename.example.text()
+    assert "10-23-2026 12-01-00 AM.jpg" in win.sidebar.rename.example.text()
     win.sidebar.rename.apply()
     settle(win)
-    assert (folder / "2026-10-23_00-01-00.jpg").exists()
-    assert any(i.name == "2026-10-23_00-01-00.jpg" for i in win.model.items)
+    assert (folder / "10-23-2026 12-01-00 AM.jpg").exists()
+    assert any(i.name == "10-23-2026 12-01-00 AM.jpg" for i in win.model.items)
 
 
 def test_move_and_viewer(window, tmp_path, monkeypatch):
@@ -494,3 +494,46 @@ def test_collapsible_groups(window):
     assert win.grid.isRowHidden(win.model.row_of(red))
     win.grid.set_all_groups(False)
     assert not win.grid.isRowHidden(win.model.row_of(red))
+
+
+def test_keyword_buttons_are_equal_size_boxes(window):
+    win, _, _ = window
+    panel = win.sidebar.keywords
+    win.resize(1400, 900)
+    QApplication.processEvents()
+    assert isinstance(panel.grid, type(panel.grid)) and panel.grid.__class__.__name__ == "QGridLayout"
+    widths = {b.width() for b in panel.buttons.values()}
+    assert max(widths) - min(widths) <= 1  # every box the same width (±1px rounding)
+    me = panel.grid.getItemPosition(panel.grid.indexOf(panel.buttons["me"]))[:2]
+    queens = panel.grid.getItemPosition(panel.grid.indexOf(panel.buttons["queens"]))[:2]
+    assert me == (0, 0) and queens == (1, 0)  # 3 per row, in set order
+
+
+def test_rename_default_is_us_format(window, tmp_path):
+    import json
+
+    from photo_manager.core.settings import Settings
+
+    win, folder, et = window
+    assert win.sidebar.rename.pattern.currentText() == "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"
+    et.write(str(folder / "vacation.jpg"), ["-AllDates=2026:08:15 11:42:44"])
+    win.open_folder(str(folder))
+    settle(win)
+    select(win, "vacation.jpg")
+    win.sidebar.rename.apply()
+    settle(win)
+    assert (folder / "08-15-2026 11-42-44 AM.jpg").exists()
+    # ...and reading the date back from such a name works.
+    from photo_manager.core.templates import DEFAULT_TEMPLATES, match_any
+
+    assert match_any(DEFAULT_TEMPLATES, "08-15-2026 11-42-44 PM_1.jpg")[1] == datetime(2026, 8, 15, 23, 42, 44)
+
+    # Existing settings with the old default pattern switch over once.
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({"rename_pattern": "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"}))
+    s = Settings.load(path)
+    assert s.rename_pattern == "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"
+    assert s.rename_presets[0] == s.rename_pattern
+    s.rename_pattern = "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"  # choosing the old one again later sticks
+    s.save()
+    assert Settings.load(path).rename_pattern == "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"
