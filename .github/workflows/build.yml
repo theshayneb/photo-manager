@@ -44,10 +44,12 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:RUNNER_TEMP "selftest.json"
-          Start-Process -FilePath dist\PhotoManager\PhotoManager.exe -ArgumentList "--self-test", "`"$out`"" -Wait
+          $p = Start-Process -FilePath dist\PhotoManager\PhotoManager.exe -ArgumentList "--self-test", "`"$out`"" -Wait -PassThru
           Get-Content $out
+          Write-Host "exe exit code: $($p.ExitCode)"
           $r = Get-Content $out | ConvertFrom-Json
           if (-not $r.ok) { throw "self-test failed" }
+          if ($p.ExitCode -ne 0) { throw "the app did not exit cleanly (exit code $($p.ExitCode))" }
 
       - name: Zip
         shell: pwsh

@@ -8,12 +8,9 @@ thumbnail for the file.
 from __future__ import annotations
 
 import sys
-import threading
 import uuid
 
 from PIL import Image
-
-_local = threading.local()
 
 if sys.platform == "win32":
     import ctypes
@@ -45,6 +42,8 @@ if sys.platform == "win32":
 
     _ole32.CoInitializeEx.argtypes = [c_void_p, wintypes.DWORD]
     _ole32.CoInitializeEx.restype = ctypes.c_long
+    _ole32.CoUninitialize.argtypes = []
+    _ole32.CoUninitialize.restype = None
     _shell32.SHCreateItemFromParsingName.argtypes = [wintypes.LPCWSTR, c_void_p, POINTER(_GUID), POINTER(c_void_p)]
     _shell32.SHCreateItemFromParsingName.restype = ctypes.c_long
     _gdi32.GetObjectW.argtypes = [wintypes.HANDLE, ctypes.c_int, c_void_p]
@@ -63,10 +62,7 @@ if sys.platform == "win32":
     _GetImage = ctypes.WINFUNCTYPE(ctypes.c_long, c_void_p, _SIZE, ctypes.c_int, POINTER(wintypes.HBITMAP))
     _Release = ctypes.WINFUNCTYPE(ctypes.c_ulong, c_void_p)
 
-    def _ensure_com() -> None:
-        if not getattr(_local, "com", False):
-            _ole32.CoInitializeEx(None, 0x2)  # apartment threaded; "already initialised" is fine
-            _local.com = True
+    _RPC_E_CHANGED_MODE = -2147417850  # 0x80010106: thread already uses another COM mode
 
     def _hbitmap_to_image(hbmp: wintypes.HBITMAP) -> Image.Image | None:
         bm = _BITMAP()
@@ -95,7 +91,16 @@ if sys.platform == "win32":
         return im.copy()
 
     def shell_thumbnail(path: str, size: int) -> Image.Image | None:
-        _ensure_com()
+        # COM is switched on and off around every call. Leaving it on in worker threads
+        # made Windows' thumbnail components crash when the process exited.
+        hr = _ole32.CoInitializeEx(None, 0x2)  # apartment threaded
+        try:
+            return _shell_thumbnail(path, size)
+        finally:
+            if hr != _RPC_E_CHANGED_MODE:  # S_OK or S_FALSE must be balanced
+                _ole32.CoUninitialize()
+
+    def _shell_thumbnail(path: str, size: int) -> Image.Image | None:
         factory = c_void_p()
         hr = _shell32.SHCreateItemFromParsingName(path, None, byref(_IID_FACTORY), byref(factory))
         if hr < 0 or not factory.value:

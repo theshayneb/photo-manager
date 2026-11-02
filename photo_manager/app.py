@@ -44,6 +44,10 @@ def self_test(out_path: str) -> int:
         result["heic"] = ".heic" in Image.registered_extensions()
         result["avif"] = bool(features.check("avif"))
         result["icon"] = ICON.exists()
+        if sys.platform == "win32":
+            from .core.winthumb import shell_thumbnail
+
+            result["shell_thumbnail"] = shell_thumbnail(str(ICON), 64) is not None
         window = MainWindow(settings, et)
         window.close()
         result["ok"] = bool(result["exiftool"] and result["heic"] and result["icon"])
