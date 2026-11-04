@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Video thumbnails show how long the video is in a small chip at the bottom-right (opposite the ▶).
+
 ## 0.9.0
 
 - **Filter** (toolbar, after Sort and Group): tick File types, Labels (colors, ⭐ Starred, 🔖 Bookmarked, No label),

@@ -59,3 +59,14 @@ def test_media_kinds():
     assert kind("x.HEIC") == "image" and kind("x.mov") == "video" and kind("x.txt") is None
     assert metadata_writable("x.webp") and metadata_writable("x.mp4")
     assert not metadata_writable("x.avi") and not metadata_writable("x.bmp")
+
+
+def test_video_duration_is_read_and_formatted():
+    from photo_manager.core.metadata import format_duration, parse_duration
+
+    assert parse_meta({"QuickTime:Duration": 125.4}).duration == 125.4
+    assert parse_meta({"Composite:Duration": "0:01:05"}).duration == 65
+    assert parse_meta({"QuickTime:Duration": "12.50 s"}).duration == 12.5
+    assert parse_meta({"XMP:Label": "Red"}).duration is None
+    assert parse_duration("") is None and parse_duration("n/a") is None
+    assert [format_duration(s) for s in (2.4, 65, 3933, 0, None)] == ["0:02", "1:05", "1:05:33", "", ""]

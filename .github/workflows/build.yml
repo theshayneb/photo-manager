@@ -27,6 +27,12 @@ jobs:
         shell: pwsh
         run: ./scripts/get-exiftool.ps1
 
+      - name: Get ffmpeg (only used by tests to make sample videos)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+
       - name: Tests (including real ExifTool round trips)
         env:
           QT_QPA_PLATFORM: offscreen

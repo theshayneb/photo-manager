@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemD
 
 from ..core import dates, thumbs
 from ..core.media import kind
-from ..core.metadata import LABELS, Meta
+from ..core.metadata import LABELS, Meta, format_duration
 from ..core.templates import follows_pattern
 
 THUMB_PIXELS = 320  # generated once, scaled down for display
@@ -598,6 +598,15 @@ class ThumbDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(badge, 4, 4)
             painter.setPen(QColor("white"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "▶")
+            length = format_duration(item.meta.duration if item.meta else None)
+            if length:  # how long the video is, opposite the ▶
+                width = option.fontMetrics.horizontalAdvance(length) + 12
+                chip = QRect(target.right() - width - 4, target.bottom() - 22, width, 18)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(0, 0, 0, 170))
+                painter.drawRoundedRect(chip, 4, 4)
+                painter.setPen(QColor("white"))
+                painter.drawText(chip, Qt.AlignmentFlag.AlignCenter, length)
 
         paint_flags(painter, target, item.meta)
 

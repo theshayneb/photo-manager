@@ -1192,3 +1192,17 @@ def test_filtered_out_photos_still_get_their_labels_updated(window):
     win.model.set_meta({hidden.path: parse_meta({"XMP:Label": "Green"})})
     assert hidden.meta.label == "Green"
     win.clear_filter()
+
+
+def test_video_thumbnail_shows_its_length(window):
+    import json
+
+    win, folder, _ = window
+    clip = folder / "clip.mp4"
+    clip.write_bytes(b"not really a video")
+    (folder / "clip.mp4.fake.json").write_text(json.dumps({"QuickTime:Duration": 125.0}))
+    win.open_folder(str(folder))
+    settle(win)
+    item = win.model.item(str(clip))
+    assert item.meta.duration == 125.0
+    win.grid.viewport().repaint()  # paints the "2:05" chip without errors

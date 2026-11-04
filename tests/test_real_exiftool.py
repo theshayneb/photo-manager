@@ -112,3 +112,17 @@ def test_star_and_bookmark_round_trip(et, tmp_path, name):
     assert et.write(path, flag_args("Bookmark", False)) is None
     meta = read(et, path)
     assert not meta.starred and not meta.bookmarked
+
+
+def test_video_duration_from_real_exiftool(et, tmp_path):
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("needs ffmpeg to make a test video")
+    clip = tmp_path / "clip.mp4"
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10",
+                    "-t", "3", "-pix_fmt", "yuv420p", str(clip)], check=True, timeout=120)
+    meta = read(et, str(clip))
+    assert meta.duration is not None and abs(meta.duration - 3) < 0.5

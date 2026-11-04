@@ -23,6 +23,7 @@ READ_TAGS = [
     "-XMP:Label",
     "-XMP:Rating",
     "-XMP-xmpDM:Good",
+    "-Duration#",  # videos: length in seconds (# = plain number)
     "-Composite:ImageSize",
 ]
 
@@ -52,6 +53,7 @@ class Meta:
     label: str = ""
     rating: int = 0
     bookmarked: bool = False
+    duration: float | None = None  # videos: length in seconds
     image_size: str = ""
 
     @property
@@ -77,6 +79,34 @@ def _as_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value]
     return [str(value)]
+
+
+def parse_duration(value: object) -> float | None:
+    """Seconds from ExifTool's Duration: 12.5, "12.5", "12.50 s" or "0:01:05"."""
+    if isinstance(value, (int, float)):
+        return float(value) if value > 0 else None
+    text = str(value or "").strip().lower().replace("(approx)", "").strip()
+    if not text:
+        return None
+    try:
+        if ":" in text:
+            seconds = 0.0
+            for part in text.split(":"):
+                seconds = seconds * 60 + float(part)
+            return seconds or None
+        return float(text.rstrip("s").strip()) or None
+    except ValueError:
+        return None
+
+
+def format_duration(seconds: float | None) -> str:
+    """0:07, 4:32, 1:05:33."""
+    if not seconds or seconds <= 0:
+        return ""
+    total = int(round(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 def parse_meta(data: dict) -> Meta:
@@ -105,6 +135,11 @@ def parse_meta(data: dict) -> Meta:
     except (TypeError, ValueError):
         meta.rating = 0
     meta.bookmarked = str(data.get("XMP:Good", "")).strip().lower() in ("true", "1")
+    for key, value in data.items():
+        if key.split(":")[-1] == "Duration":
+            meta.duration = parse_duration(value)
+            if meta.duration:
+                break
     meta.image_size = str(data.get("Composite:ImageSize") or "").replace(" ", "x")
     return meta
 
