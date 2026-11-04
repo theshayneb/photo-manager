@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2
+
+- Fixed: closing the app while it was still reading file details could show a "something went wrong" message.
+  Closing now finishes all pending work (including saves), then ignores late results.
+- ExifTool's pipes are closed properly when the app closes.
+
 ## 0.9.1
 
 - Video thumbnails show how long the video is in a small chip at the bottom-right (opposite the ▶).

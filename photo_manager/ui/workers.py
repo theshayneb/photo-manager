@@ -15,11 +15,12 @@ class _Relay(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+        self.enabled = True
         self.finished.connect(self._deliver)
 
     @Slot(object, object, object)
     def _deliver(self, callback: Callable[[Any, str | None], None], result: Any, error: str | None) -> None:
-        if callback:
+        if callback and self.enabled:  # never call back into a window that has closed
             callback(result, error)
 
 
@@ -50,3 +51,9 @@ class Background:
 
     def wait(self, msecs: int = -1) -> bool:
         return self.pool.waitForDone(msecs)
+
+    def shutdown(self, msecs: int = 10_000) -> None:
+        """Finish ALL queued work (pending saves must not be lost), then stop delivering
+        results, so nothing calls back into a window that has closed."""
+        self.pool.waitForDone(msecs)
+        self._relay.enabled = False

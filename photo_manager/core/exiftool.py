@@ -81,6 +81,14 @@ class ExifTool:
                 proc.wait(timeout=5)
             except (OSError, subprocess.TimeoutExpired):
                 proc.kill()
+                proc.wait(timeout=5)
+            finally:
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
+                    if stream:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
 
     def __enter__(self) -> "ExifTool":
         self.start()

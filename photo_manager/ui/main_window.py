@@ -1319,7 +1319,7 @@ class MainWindow(QMainWindow):
             pass
         self.preview.video.shutdown()
         self.model.shutdown()  # thumbnail threads must be finished before Qt is torn down
-        self.bg.wait(10_000)
+        self.bg.shutdown(10_000)  # results arriving after this point are dropped
         if self.et:
             self.et.close()
         super().closeEvent(event)

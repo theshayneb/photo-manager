@@ -1206,3 +1206,31 @@ def test_video_thumbnail_shows_its_length(window):
     item = win.model.item(str(clip))
     assert item.meta.duration == 125.0
     win.grid.viewport().repaint()  # paints the "2:05" chip without errors
+
+
+def test_results_arriving_after_close_are_dropped(qapp, tmp_path, capsys):
+    """Regression: a metadata read finishing just after the window closed called into it."""
+    folder = tmp_path / "pics"
+    folder.mkdir()
+    for n in range(30):
+        Image.new("RGB", (64, 48), "red").save(folder / f"p{n}.jpg")
+    settings = Settings.load(tmp_path / "s.json")
+    settings.last_folder = str(folder)
+    win = MainWindow(settings, ExifTool(FAKE_EXIFTOOL))
+    win.show()
+    QApplication.processEvents()  # starts the metadata reads
+    win.close()
+    win.deleteLater()
+    from PySide6.QtCore import QEvent
+
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()
+    assert "already deleted" not in capsys.readouterr().err
+
+
+def test_label_set_just_before_closing_is_still_saved(window):
+    win, folder, et = window
+    select(win, "vacation.jpg")
+    win._label_shortcut("Purple")  # queued...
+    win.close()                    # ...and the window closes straight away
+    assert meta_of(et, folder / "vacation.jpg").label == "Purple"
