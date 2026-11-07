@@ -512,6 +512,29 @@ class SteamImportDialog(QDialog):
         form.addRow("Save into:", self._with_browse(self.dest, "Save Steam screenshots into"))
         layout.addLayout(form)
 
+        layout.addWidget(QLabel("<b>Also look in</b> (optional):"))
+        hint = QLabel("Missing a game's screenshots? In Steam open <i>View → Screenshots</i>, pick the game, "
+                      "click <i>Show on Disk</i>, and add the folder that opens. Subfolders are included.")
+        hint.setWordWrap(True)
+        hint.setProperty("hint", True)
+        layout.addWidget(hint)
+        row = QHBoxLayout()
+        self.extra = QListWidget()
+        self.extra.setMaximumHeight(64)
+        for folder in settings.steam_extra_folders:
+            self.extra.addItem(folder)
+        row.addWidget(self.extra, 1)
+        buttons_col = QVBoxLayout()
+        add = QPushButton("Add folder…")
+        add.clicked.connect(self._add_extra)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(self._remove_extra)
+        buttons_col.addWidget(add)
+        buttons_col.addWidget(remove)
+        buttons_col.addStretch(1)
+        row.addLayout(buttons_col)
+        layout.addLayout(row)
+
         self.set_date = QCheckBox("Set Date taken (and Windows Created date) from the screenshot's file name")
         self.set_date.setChecked(settings.steam_set_date)
         self.keyword = QCheckBox("Add the game's name as a keyword")
@@ -522,6 +545,14 @@ class SteamImportDialog(QDialog):
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        from PySide6.QtWidgets import QTreeWidget
+
+        self.games = QTreeWidget()
+        self.games.setHeaderLabels(["Game", "Screenshots", "Newest"])
+        self.games.setRootIsDecorated(False)
+        self.games.setMaximumHeight(150)
+        self.games.setColumnWidth(0, 280)
+        layout.addWidget(self.games)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self._accept)
@@ -547,6 +578,20 @@ class SteamImportDialog(QDialog):
         row.addWidget(button)
         return box
 
+    def extra_folders(self) -> list[str]:
+        return [self.extra.item(i).text() for i in range(self.extra.count())]
+
+    def _add_extra(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Also look for screenshots in")
+        if folder and os.path.normpath(folder) not in self.extra_folders():
+            self.extra.addItem(os.path.normpath(folder))
+            self._update()
+
+    def _remove_extra(self) -> None:
+        for item in self.extra.selectedItems():
+            self.extra.takeItem(self.extra.row(item))
+        self._update()
+
     def _reload_accounts(self) -> None:
         self.account.blockSignals(True)
         self.account.clear()
@@ -564,14 +609,22 @@ class SteamImportDialog(QDialog):
         path = self.steam_path.text().strip()
         dest = self.dest.text().strip()
         self.plan = []
-        if not path or self.account.count() == 0:
+        self.games.clear()
+        if (not path or self.account.count() == 0) and not self.extra_folders():
             self.summary.setText("<span style='color:#e5484d'>No Steam screenshots found there. "
                                  "Choose your Steam folder (the one that contains “userdata”).</span>")
             self.ok.setEnabled(False)
             self.ok.setText("Import")
             return
-        shots = self._steam.find_screenshots(path, self.account.currentData() or None)
-        games = len({s.app_id for s in shots})
+        shots = self._steam.find_screenshots(path, self.account.currentData() or None, self.extra_folders()) \
+            if self.account.count() else self._steam.find_screenshots("", None, self.extra_folders())
+        rows = self._steam.per_game(shots)
+        from PySide6.QtWidgets import QTreeWidgetItem
+
+        for game, count, newest in rows:
+            self.games.addTopLevelItem(QTreeWidgetItem(
+                [game, str(count), dates.format_display(newest, "%m-%d-%Y %I:%M %p") if newest else ""]))
+        games = len(rows)
         text = f"{len(shots)} screenshot{'s' if len(shots) != 1 else ''} from {games} game{'s' if games != 1 else ''}."
         if dest:
             self.plan = self._steam.plan_import(shots, dest)
@@ -587,6 +640,7 @@ class SteamImportDialog(QDialog):
         s.steam_path = self.steam_path.text().strip()
         s.steam_account = self.account.currentData() or ""
         s.steam_dest = self.dest.text().strip()
+        s.steam_extra_folders = self.extra_folders()
         s.steam_set_date = self.set_date.isChecked()
         s.steam_keyword = self.keyword.isChecked()
         self.accept()

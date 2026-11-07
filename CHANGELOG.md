@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.1
+
+- Steam import also reads Steam's own screenshot index (`760\screenshots.vdf`), so screenshots a game saved
+  itself and added to Steam's library are found wherever the file lives.
+- More image types (WEBP, AVIF, JXR/HDR, BMP, TIFF, HEIC).
+- **Also look in** folders (remembered, subfolders included), e.g. the folder Steam opens with *Show on Disk*.
+- The dialog lists every game found with its number of screenshots and newest date.
+- A screenshot found in two places is imported once (the bigger, better-quality copy).
+
 ## 0.10.0
 
 - **Tools → Import Steam screenshots…** copies every screenshot Steam keeps on this PC (uploaded or not) straight

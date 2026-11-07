@@ -64,3 +64,60 @@ def test_name_clash_gets_a_suffix_never_overwrites(tmp_path):
     names = sorted(Path(target).name for _, target in plan)
     assert names == ["20260101120000_1.png", "20261104213012_1_1.jpg", "20261104213015_1.jpg"]
     assert (dest / "20261104213012_1.jpg").read_bytes() == b"different size"
+
+
+def test_screenshots_listed_only_in_steams_index_are_found(tmp_path):
+    """A game that saves screenshots itself and adds them to Steam's library: the file can
+    live outside 760/remote; Steam's screenshots.vdf points at it."""
+    s = make_steam(tmp_path)
+    own = tmp_path / "Games" / "SomeGame" / "Screens"
+    own.mkdir(parents=True)
+    (own / "20261107083000_1.png").write_bytes(b"x" * 50)
+    index = s / "userdata" / "12345" / "760" / "screenshots.vdf"
+    index.write_text('''"Screenshots"
+{
+\t"620"
+\t{
+\t\t"0"
+\t\t{
+\t\t\t"type"\t\t"1"
+\t\t\t"filename"\t\t"%s"
+\t\t\t"imported"\t\t"1"
+\t\t}
+\t}
+\t"440"
+\t{
+\t\t"0"
+\t\t{
+\t\t\t"filename"\t\t"440/screenshots/20261104213012_1.jpg"
+\t\t}
+\t}
+}
+''' % str(own / "20261107083000_1.png").replace("\\", "\\\\"))
+    shots = steam.find_screenshots(str(s), "12345")
+    names = [Path(x.path).name for x in shots]
+    assert "20261107083000_1.png" in names
+    found = next(x for x in shots if x.path.endswith("20261107083000_1.png"))
+    assert found.game == "Portal 2: <Ed>" and found.taken == datetime(2026, 11, 7, 8, 30)
+    assert names.count("20261104213012_1.jpg") == 1  # listed in the index AND in the folder: once
+    assert steam.per_game(shots)[0][:2] == ("Portal 2: <Ed>", 1)  # newest game first
+
+
+def test_extra_folders_and_duplicate_copies(tmp_path):
+    s = make_steam(tmp_path)
+    extra = tmp_path / "Uncompressed"
+    (extra / "Team Fortress 2").mkdir(parents=True)
+    (extra / "Team Fortress 2" / "20261104213012_1.png").write_bytes(b"p" * 500)  # bigger copy
+    (extra / "Team Fortress 2" / "20261106100000_1.jxr").write_bytes(b"h" * 50)   # HDR capture
+    (extra / "Team Fortress 2" / "thumbnails").mkdir()
+    (extra / "Team Fortress 2" / "thumbnails" / "20261106100000_1.jpg").write_bytes(b"t")
+    shots = steam.find_screenshots(str(s), "12345", [str(extra)])
+    stems = sorted(Path(x.path).stem for x in shots)
+    assert stems == ["20260101120000_1", "20261104213012_1", "20261104213015_1", "20261106100000_1"]
+    tf2 = next(x for x in shots if Path(x.path).stem == "20261104213012_1")
+    assert tf2.path.endswith(".png") and tf2.game == "Team Fortress 2"  # the better copy, once
+
+
+def test_parse_vdf_nested_and_escapes():
+    data = steam.parse_vdf('"a"\n{\n\t"b"\t"C:\\\\Games\\\\x"\n\t"c"\n\t{\n\t\t"d"\t"1"\n\t}\n}\n')
+    assert data == {"a": {"b": "C:\\Games\\x", "c": {"d": "1"}}}

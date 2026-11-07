@@ -1295,3 +1295,28 @@ def test_import_steam_screenshots_end_to_end(window, tmp_path, monkeypatch):
     again = SteamImportDialog(win.settings)
     assert again.plan == [] and not again.ok.isEnabled()
     assert again.dest.text() == str(dest)  # the folder is remembered
+
+
+def test_steam_dialog_lists_games_and_remembers_extra_folders(qapp, tmp_path):
+    from photo_manager.core.settings import Settings
+    from photo_manager.ui.dialogs import SteamImportDialog
+
+    from .test_steam import make_steam
+
+    root = make_steam(tmp_path / "home")
+    extra = tmp_path / "Uncompressed" / "Hades"
+    extra.mkdir(parents=True)
+    (extra / "20261107091500_1.png").write_bytes(b"z" * 20)
+    s = Settings.load(tmp_path / "s.json")
+    s.steam_path, s.steam_dest = str(root), str(tmp_path / "out")
+    dlg = SteamImportDialog(s)
+    games = [dlg.games.topLevelItem(i).text(0) for i in range(dlg.games.topLevelItemCount())]
+    assert games == ["Team Fortress 2", "App 999999"]  # newest first
+    dlg.extra.addItem(str(tmp_path / "Uncompressed"))
+    dlg._update()
+    games = [dlg.games.topLevelItem(i).text(0) for i in range(dlg.games.topLevelItemCount())]
+    assert games[0] == "Hades" and "4 new" in dlg.summary.text()
+    dlg._accept()
+    assert s.steam_extra_folders == [str(tmp_path / "Uncompressed")]
+    again = SteamImportDialog(s)
+    assert again.extra_folders() == [str(tmp_path / "Uncompressed")]

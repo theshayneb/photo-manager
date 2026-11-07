@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .fileops import unique_path
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".jxr", ".bmp", ".tif", ".tiff", ".heic"}
 _NAME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})")
 
 
@@ -113,26 +113,121 @@ def taken_from_name(name: str) -> datetime | None:
         return None
 
 
-def find_screenshots(steam: str, account: str | None = None) -> list[Shot]:
-    """Every screenshot of one account (or all accounts), oldest first."""
+def parse_vdf(text: str) -> dict:
+    """Steam's text VDF/ACF format: nested {"key": "value" | {...}}."""
+    tokens = re.findall(r'"((?:[^"\\]|\\.)*)"|([{}])', text)
+    root: dict = {}
+    stack = [root]
+    key: str | None = None
+    for quoted, brace in tokens:
+        if brace == "{":
+            child: dict = {}
+            if key is not None:
+                stack[-1][key] = child
+            stack.append(child)
+            key = None
+        elif brace == "}":
+            if len(stack) > 1:
+                stack.pop()
+            key = None
+        else:
+            value = quoted.replace("\\\\", "\\").replace('\\"', '"')
+            if key is None:
+                key = value
+            else:
+                stack[-1][key] = value
+                key = None
+    return root
+
+
+def _indexed_files(steam: str, account: str) -> list[tuple[str, str]]:
+    """[(app id, file path)] from Steam's screenshot index (760/screenshots.vdf).
+
+    This also covers screenshots a game saved itself and added to Steam's library,
+    which can live outside the usual folder."""
+    base = Path(steam) / "userdata" / account / "760"
+    try:
+        data = parse_vdf((base / "screenshots.vdf").read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return []
+    top = next((v for k, v in data.items() if k.lower() == "screenshots" and isinstance(v, dict)), {})
+    found = []
+    for app_id, entries in top.items():
+        if not isinstance(entries, dict) or not app_id.isdigit():
+            continue
+        for entry in entries.values():
+            if not isinstance(entry, dict) or not entry.get("filename"):
+                continue
+            name = entry["filename"].replace("/", os.sep).replace("\\", os.sep)
+            path = Path(name) if os.path.isabs(name) or re.match(r"^[A-Za-z]:", name) else base / "remote" / name
+            found.append((app_id, str(path)))
+    return found
+
+
+def find_screenshots(steam: str, account: str | None = None,
+                     extra_folders: list[str] | None = None) -> list[Shot]:
+    """Every screenshot of one account (or all accounts), oldest first.
+
+    Looks in Steam's screenshot folders, in Steam's own screenshot index, and in any
+    extra folders (with their subfolders). The same screenshot found twice is listed once."""
     names = game_names(steam)
     ids = [account] if account else accounts(steam)
     shots: list[Shot] = []
+    seen: set[str] = set()
+
+    def add(path: str, app_id: str, game: str) -> None:
+        key = os.path.normcase(os.path.normpath(path))
+        if key in seen or Path(path).suffix.lower() not in IMAGE_EXTS or not os.path.isfile(path):
+            return
+        seen.add(key)
+        shots.append(Shot(path, app_id, game, taken_from_name(os.path.basename(path))))
+
     for acct in ids:
         remote = Path(steam) / "userdata" / acct / "760" / "remote"
-        if not remote.is_dir():
+        if remote.is_dir():
+            for app_dir in remote.iterdir():
+                folder = app_dir / "screenshots"
+                if folder.is_dir():
+                    for file in folder.iterdir():  # not recursive: skips the "thumbnails" folder
+                        add(str(file), app_dir.name, names.get(app_dir.name, f"App {app_dir.name}"))
+        for app_id, path in _indexed_files(steam, acct):
+            add(path, app_id, names.get(app_id, f"App {app_id}"))
+    for folder in extra_folders or []:
+        for dirpath, dirnames, filenames in os.walk(folder):
+            dirnames[:] = [d for d in dirnames if d.lower() != "thumbnails"]
+            game = os.path.basename(dirpath) if os.path.normcase(dirpath) != os.path.normcase(folder) else "Other"
+            for filename in filenames:
+                add(os.path.join(dirpath, filename), "", game)
+    # A screenshot saved in two places (e.g. Steam's copy + an uncompressed copy) is one screenshot:
+    # keep one per file name stem, preferring the bigger (better quality) file.
+    best: dict[str, Shot] = {}
+    for shot in shots:
+        stem = os.path.splitext(os.path.basename(shot.path))[0].lower()
+        if not _NAME.match(stem):  # not a Steam-style name: never merged
+            best[shot.path] = shot
             continue
-        for app_dir in remote.iterdir():
-            folder = app_dir / "screenshots"
-            if not folder.is_dir():
-                continue
-            app_id = app_dir.name
-            game = names.get(app_id, f"App {app_id}")
-            for file in folder.iterdir():  # not recursive: skips the "thumbnails" folder
-                if file.is_file() and file.suffix.lower() in IMAGE_EXTS:
-                    shots.append(Shot(str(file), app_id, game, taken_from_name(file.name)))
-    shots.sort(key=lambda s: (s.taken or datetime.max, s.path))
-    return shots
+        current = best.get(stem)
+        if current is None:
+            best[stem] = shot
+            continue
+        bigger = shot if os.path.getsize(shot.path) > os.path.getsize(current.path) else current
+        other = current if bigger is shot else shot
+        if bigger.game == "Other" and other.game != "Other":  # keep the real game name
+            bigger = Shot(bigger.path, other.app_id, other.game, bigger.taken)
+        best[stem] = bigger
+    result = list(best.values())
+    result.sort(key=lambda s: (s.taken or datetime.max, s.path))
+    return result
+
+
+def per_game(shots: list[Shot]) -> list[tuple[str, int, datetime | None]]:
+    """[(game, count, newest)] sorted by newest first, to show what was found."""
+    games: dict[str, list[Shot]] = {}
+    for shot in shots:
+        games.setdefault(shot.game, []).append(shot)
+    rows = [(g, len(s), max((x.taken for x in s if x.taken), default=None)) for g, s in games.items()]
+    rows.sort(key=lambda r: r[2] or datetime.min, reverse=True)
+    return rows
 
 
 def plan_import(shots: list[Shot], dest: str) -> list[tuple[Shot, str]]:

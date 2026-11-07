@@ -77,6 +77,7 @@ class Settings:
     steam_path: str = ""
     steam_account: str = ""
     steam_dest: str = ""
+    steam_extra_folders: list[str] = field(default_factory=list)
     steam_set_date: bool = True
     steam_keyword: bool = False
     video_autoplay: bool = False
