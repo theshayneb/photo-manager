@@ -476,3 +476,117 @@ class HotkeyDialog(QDialog):
             if keys:
                 seen[keys] = name
         self.accept()
+
+
+class SteamImportDialog(QDialog):
+    """Pick the Steam folder, account and destination; shows how many screenshots are new."""
+
+    def __init__(self, settings, parent: QWidget | None = None):  # type: ignore[no-untyped-def]
+        from PySide6.QtWidgets import QComboBox, QFormLayout
+
+        from ..core import steam
+
+        super().__init__(parent)
+        self._steam = steam
+        self.settings = settings
+        self.setWindowTitle("Import Steam screenshots")
+        self.setMinimumWidth(560)
+        layout = QVBoxLayout(self)
+        intro = QLabel("Copies the screenshots Steam keeps on this PC (all of them, uploaded or not) straight "
+                       "into the folder you choose. Steam's own copies are not changed, and screenshots you've "
+                       "already imported are skipped.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        self.steam_path = QLineEdit(settings.steam_path or steam.find_steam() or "")
+        self.steam_path.setPlaceholderText(r"e.g. C:\Program Files (x86)\Steam")
+        self.steam_path.editingFinished.connect(self._reload_accounts)
+        form.addRow("Steam folder:", self._with_browse(self.steam_path, "Steam folder"))
+        self.account = QComboBox()
+        self.account.currentIndexChanged.connect(lambda _i: self._update())
+        form.addRow("Steam account:", self.account)
+        self.dest = QLineEdit(settings.steam_dest)
+        self.dest.setPlaceholderText(r"e.g. D:\Pictures\Steam")
+        self.dest.textChanged.connect(lambda _t: self._update())
+        form.addRow("Save into:", self._with_browse(self.dest, "Save Steam screenshots into"))
+        layout.addLayout(form)
+
+        self.set_date = QCheckBox("Set Date taken (and Windows Created date) from the screenshot's file name")
+        self.set_date.setChecked(settings.steam_set_date)
+        self.keyword = QCheckBox("Add the game's name as a keyword")
+        self.keyword.setChecked(settings.steam_keyword)
+        for box in (self.set_date, self.keyword):
+            layout.addWidget(box)
+
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.plan: list = []
+        self._reload_accounts()
+
+    def _with_browse(self, edit: QLineEdit, title: str) -> QWidget:
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(edit, 1)
+        button = QPushButton("Browse…")
+
+        def browse() -> None:
+            folder = QFileDialog.getExistingDirectory(self, title, edit.text())
+            if folder:
+                edit.setText(os.path.normpath(folder))
+                edit.editingFinished.emit()
+
+        button.clicked.connect(browse)
+        row.addWidget(button)
+        return box
+
+    def _reload_accounts(self) -> None:
+        self.account.blockSignals(True)
+        self.account.clear()
+        ids = self._steam.accounts(self.steam_path.text().strip()) if self.steam_path.text().strip() else []
+        if len(ids) > 1:
+            self.account.addItem("All accounts", "")
+        for acct in ids:
+            self.account.addItem(acct, acct)
+        index = self.account.findData(self.settings.steam_account)
+        self.account.setCurrentIndex(max(0, index))
+        self.account.blockSignals(False)
+        self._update()
+
+    def _update(self) -> None:
+        path = self.steam_path.text().strip()
+        dest = self.dest.text().strip()
+        self.plan = []
+        if not path or self.account.count() == 0:
+            self.summary.setText("<span style='color:#e5484d'>No Steam screenshots found there. "
+                                 "Choose your Steam folder (the one that contains “userdata”).</span>")
+            self.ok.setEnabled(False)
+            self.ok.setText("Import")
+            return
+        shots = self._steam.find_screenshots(path, self.account.currentData() or None)
+        games = len({s.app_id for s in shots})
+        text = f"{len(shots)} screenshot{'s' if len(shots) != 1 else ''} from {games} game{'s' if games != 1 else ''}."
+        if dest:
+            self.plan = self._steam.plan_import(shots, dest)
+            text += f" <b>{len(self.plan)} new</b> to import."
+        else:
+            text += " Choose where to save them."
+        self.summary.setText(text)
+        self.ok.setText(f"Import {len(self.plan)}" if dest else "Import")
+        self.ok.setEnabled(bool(dest and self.plan))
+
+    def _accept(self) -> None:
+        s = self.settings
+        s.steam_path = self.steam_path.text().strip()
+        s.steam_account = self.account.currentData() or ""
+        s.steam_dest = self.dest.text().strip()
+        s.steam_set_date = self.set_date.isChecked()
+        s.steam_keyword = self.keyword.isChecked()
+        self.accept()

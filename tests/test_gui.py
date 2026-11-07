@@ -1252,3 +1252,46 @@ def test_existing_users_get_the_number_date_template(tmp_path):
     patterns = [t.pattern for t in Settings.load(path).templates]
     assert "*_{YYYY}{MM}{DD}{HH}{mm}{ss}" in patterns
     assert patterns.index("*_{YYYY}{MM}{DD}{HH}{mm}{ss}") < patterns.index("*{YYYY}{MM}{DD}?{HH}{mm}{ss}")
+
+
+def test_import_steam_screenshots_end_to_end(window, tmp_path, monkeypatch):
+    from photo_manager.ui import main_window
+    from photo_manager.ui.dialogs import SteamImportDialog
+
+    from .test_steam import make_steam
+
+    win, folder, et = window
+    steam_root = make_steam(tmp_path / "steamhome")
+    dest = tmp_path / "SteamShots"
+
+    # The dialog finds the account and counts what's new.
+    win.settings.steam_path = str(steam_root)
+    dlg = SteamImportDialog(win.settings)
+    dlg.dest.setText(str(dest))
+    assert dlg.account.currentData() == "12345"
+    assert "3 screenshots from 2 games" in dlg.summary.text() and "3 new" in dlg.summary.text()
+    assert dlg.ok.text() == "Import 3"
+    dlg.keyword.setChecked(True)
+    dlg._accept()
+
+    class Accepting(SteamImportDialog):
+        def exec(self):
+            return True
+
+    monkeypatch.setattr(main_window, "SteamImportDialog", Accepting)
+    win.quiet_steam_import = True
+    win.import_steam()
+    settle(win)
+    done, failures = win.steam_import_result
+    assert len(done) == 3 and not failures
+    assert all(p.is_file() for p in dest.iterdir())  # straight into the folder, no subfolders
+    shot = dest / "20261104213012_1.jpg"
+    meta = meta_of(et, shot)
+    assert meta.date_taken == datetime(2026, 11, 4, 21, 30, 12)
+    assert meta.file_created == datetime(2026, 11, 4, 21, 30, 12)
+    assert meta.keywords == ["Team Fortress 2"]
+
+    # Running it again finds nothing new.
+    again = SteamImportDialog(win.settings)
+    assert again.plan == [] and not again.ok.isEnabled()
+    assert again.dest.text() == str(dest)  # the folder is remembered

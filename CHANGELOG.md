@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+- **Tools → Import Steam screenshots…** copies every screenshot Steam keeps on this PC (uploaded or not) straight
+  into a folder you choose (remembered). Finds Steam and your account automatically; shows how many are new;
+  skips ones already imported; never changes Steam's copies. Optionally sets Date taken (and Windows Created)
+  from the file name, and adds the game's name as a keyword.
+
 ## 0.9.3
 
 - New filename template for names like `4981570_20261105132923_1` (a number, `_`, then YYYYMMDDHHMMSS):

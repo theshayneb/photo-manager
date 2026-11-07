@@ -74,6 +74,11 @@ class Settings:
     hidden_panels: list[str] = field(default_factory=list)
     collapsed_panels: list[str] = field(default_factory=list)
     crop_as_copy: bool = False
+    steam_path: str = ""
+    steam_account: str = ""
+    steam_dest: str = ""
+    steam_set_date: bool = True
+    steam_keyword: bool = False
     video_autoplay: bool = False
     label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"

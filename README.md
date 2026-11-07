@@ -112,6 +112,15 @@ Built-in templates:
 `{hh}` (01–12) with `{AMPM}`, `{mm}` `{ss}` `{fff}` (milliseconds, ignored), and `*` any text, `?` one character, `#` one digit.
 `{MM}` is month and `{mm}` is minute.
 
+### Import Steam screenshots
+
+**Tools → Import Steam screenshots…** copies the screenshots Steam keeps on this PC (in
+`Steam\userdata\<account>\760\remote\<game>\screenshots`, uploaded or not) straight into the folder you choose,
+which is remembered. It finds Steam and your account automatically (or use Browse), shows how many screenshots are
+new, and skips ones you've already imported, so you can run it whenever you like. Steam's own copies are never
+changed. Ticked by default: **Set Date taken** from the file name (`20261104213012_1.jpg` → 11-04-2026 09:30:12 PM).
+Optional: **add the game's name as a keyword**.
+
 ### Convert (HEIC / WEBP / AVIF → JPG)
 
 Select images and use **Convert…** in the toolbar or right-click → **Convert to JPG…**. Choose JPG (with quality)

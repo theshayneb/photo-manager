@@ -51,6 +51,7 @@ from .dialogs import (
     HotkeyDialog,
     MoveDialog,
     RenameDialog,
+    SteamImportDialog,
     TemplateDialog,
 )
 from .folders import FavoritesList, FolderTree
@@ -304,6 +305,8 @@ class MainWindow(QMainWindow):
             bar.addAction(action)
 
     def _build_menus(self) -> None:
+        tools = self.menuBar().addMenu("&Tools")
+        tools.addAction("Import Steam screenshots…", self.import_steam)
         view = self.menuBar().addMenu("&View")
 
         panels = view.addMenu("Sidebar panels")
@@ -553,6 +556,56 @@ class MainWindow(QMainWindow):
         if misnamed:
             text += f"   ·   ⚠ {misnamed} not in rename format (Ctrl+Shift+R selects them)"
         self.status.setText(text)
+
+    # --------------------------------------------------------------- steam
+
+    def import_steam(self) -> None:
+        dlg = SteamImportDialog(self.settings, self)
+        if not dlg.exec() or not dlg.plan:
+            return
+        self.settings.save()
+        from ..core import steam
+        from ..core.metadata import date_args, keyword_args
+
+        plan = dlg.plan
+        dest = self.settings.steam_dest
+        set_date, add_keyword = self.settings.steam_set_date, self.settings.steam_keyword
+        et = self.et
+        self.status.setText(f"Importing {len(plan)} Steam screenshot(s)…")
+
+        def work():  # type: ignore[no-untyped-def]
+            done, failures = steam.import_shots(plan)
+            if et is not None:
+                for shot, target in done:
+                    if set_date and shot.taken:
+                        et.write(target, date_args(target, shot.taken, True))
+                    if add_keyword:
+                        et.write(target, keyword_args(target, add=[shot.game]))
+            return done, failures
+
+        def finished(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
+            if error:
+                QMessageBox.warning(self, "Import Steam screenshots", error)
+                return
+            done, failures = result
+            here = os.path.normcase(os.path.normpath(self.model.folder or ""))
+            if any(os.path.normcase(os.path.dirname(t)) == here for _, t in done):
+                self.open_folder(self.model.folder)
+            self.status.setText(f"Imported {len(done)} Steam screenshot(s) into {dest}")
+            self.steam_import_result = (done, failures)
+            if getattr(self, "quiet_steam_import", False):
+                return
+            box = QMessageBox(QMessageBox.Icon.Information, "Import Steam screenshots",
+                              f"Imported {len(done)} screenshot{'s' if len(done) != 1 else ''} into:\n{dest}"
+                              + (f"\n\n{len(failures)} couldn't be copied." if failures else ""),
+                              QMessageBox.StandardButton.Close, self)
+            open_btn = box.addButton("Open that folder", QMessageBox.ButtonRole.AcceptRole)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                folders = {os.path.dirname(t) for _, t in done}
+                self.open_folder(folders.pop() if len(folders) == 1 else dest)
+
+        self.bg.run(work, finished)
 
     # -------------------------------------------------------------- filter
 
