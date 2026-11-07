@@ -105,6 +105,7 @@ Built-in templates:
 | `{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}` | `08-15-2026 11-42-44 AM.jpg` | Files renamed by this app |
 | `{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}` | `2026-10-23_14-34-14.jpg` | |
 | `{YYYY}{MM}{DD}{HH}{mm}{ss}` | `20261024084049_1.jpg` | Digits only |
+| `*_{YYYY}{MM}{DD}{HH}{mm}{ss}` | `4981570_20261105132923_1.jpg` | A number, then the date and time |
 | `*{YYYY}{MM}{DD}?{HH}{mm}{ss}` | `anything 20261023-143414.jpg` | Catch-all |
 
 **Edit…** opens the template editor, with a box to test a filename. Placeholders: `{YYYY}` `{YY}` `{MM}` `{DD}` `{HH}` (00–23)

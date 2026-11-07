@@ -127,10 +127,16 @@ class Settings:
     def _add_new_default_templates(self) -> None:
         """Give existing users templates added in newer versions (once each)."""
         known = set(self.known_default_templates)
-        have = {t.pattern for t in self.templates}
+        order = [t.pattern for t in DEFAULT_TEMPLATES]
         for index, template in enumerate(DEFAULT_TEMPLATES):
-            if template.pattern not in known and template.pattern not in have:
-                self.templates.insert(min(index, len(self.templates)), FilenameTemplate(**template.to_dict()))
+            have = [t.pattern for t in self.templates]
+            if template.pattern in known or template.pattern in have:
+                continue
+            # Insert before the first of the user's templates that comes after this one in
+            # the built-in order (e.g. before the catch-all), so Auto tries it in the right place.
+            later = set(order[index + 1:])
+            position = next((n for n, p in enumerate(have) if p in later), len(have))
+            self.templates.insert(position, FilenameTemplate(**template.to_dict()))
         self.known_default_templates = [t.pattern for t in DEFAULT_TEMPLATES]
 
     def save(self) -> None:

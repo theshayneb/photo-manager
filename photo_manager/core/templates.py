@@ -145,6 +145,7 @@ DEFAULT_TEMPLATES = [
     FilenameTemplate("Renamed by this app (08-15-2026 11-42-44 AM)", "{MM}-{DD}-{YYYY} {hh}-{mm}-{ss} {AMPM}"),
     FilenameTemplate("Already renamed", "{YYYY}-{MM}-{DD}_{HH}-{mm}-{ss}"),
     FilenameTemplate("Digits only (YYYYMMDDHHMMSS)", "{YYYY}{MM}{DD}{HH}{mm}{ss}"),
+    FilenameTemplate("Number_YYYYMMDDHHMMSS (e.g. 4981570_20261105132923_1)", "*_{YYYY}{MM}{DD}{HH}{mm}{ss}"),
     FilenameTemplate("Anything with YYYYMMDD_HHMMSS", "*{YYYY}{MM}{DD}?{HH}{mm}{ss}"),
 ]
 

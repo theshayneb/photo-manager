@@ -71,3 +71,13 @@ def test_rename_pattern_regex_flags_misnamed_files():
     assert follows_pattern("2026-08-15 beach.jpg", named)
     assert rename_pattern_regex("{name}") is None  # no date: nothing is flagged
     assert follows_pattern("anything.jpg", None)
+
+
+def test_number_then_compact_date_names():
+    found = match_any(DEFAULT_TEMPLATES, "4981570_20261105132923_1.jpg")
+    assert found is not None
+    assert found[0].pattern == "*_{YYYY}{MM}{DD}{HH}{mm}{ss}"
+    assert found[1] == datetime(2026, 11, 5, 13, 29, 23)
+    # The earlier, more specific templates still win for their own names.
+    assert auto("IMG_20261023_000100_358_3.jpg")[0] == "Phone photo (IMG_)"
+    assert auto("20261024084049_1.jpg")[0] == "Digits only (YYYYMMDDHHMMSS)"

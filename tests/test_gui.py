@@ -1234,3 +1234,21 @@ def test_label_set_just_before_closing_is_still_saved(window):
     win._label_shortcut("Purple")  # queued...
     win.close()                    # ...and the window closes straight away
     assert meta_of(et, folder / "vacation.jpg").label == "Purple"
+
+
+def test_existing_users_get_the_number_date_template(tmp_path):
+    import json
+
+    from photo_manager.core.settings import Settings
+
+    path = tmp_path / "s.json"
+    known = ["PXL_{YYYY}{MM}{DD}_{HH}{mm}{ss}{fff}", "{YYYY}{MM}{DD}{HH}{mm}{ss}"]
+    path.write_text(json.dumps({
+        "known_default_templates": known,
+        "templates": [
+            {"name": "Digits", "pattern": "{YYYY}{MM}{DD}{HH}{mm}{ss}", "utc": False},
+            {"name": "Catch-all", "pattern": "*{YYYY}{MM}{DD}?{HH}{mm}{ss}", "utc": False},
+        ]}))
+    patterns = [t.pattern for t in Settings.load(path).templates]
+    assert "*_{YYYY}{MM}{DD}{HH}{mm}{ss}" in patterns
+    assert patterns.index("*_{YYYY}{MM}{DD}{HH}{mm}{ss}") < patterns.index("*{YYYY}{MM}{DD}?{HH}{mm}{ss}")

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- New filename template for names like `4981570_20261105132923_1` (a number, `_`, then YYYYMMDDHHMMSS):
+  `*_{YYYY}{MM}{DD}{HH}{mm}{ss}`. Added to existing settings automatically, before the catch-all template.
+- Templates added in new versions are now always placed before your catch-all template, so Auto tries them first.
+
 ## 0.9.2
 
 - Fixed: closing the app while it was still reading file details could show a "something went wrong" message.
