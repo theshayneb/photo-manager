@@ -1382,3 +1382,32 @@ def test_steam_import_is_on_the_toolbar(window):
 
     bar = win.findChild(QToolBar, "main-toolbar")
     assert "Steam import…" in [a.text() for a in bar.actions()]
+
+
+def test_steam_mark_older_ones_as_imported(qapp, tmp_path, monkeypatch):
+    """Imported earlier and moved elsewhere: mark everything before a cut-off as imported."""
+    from datetime import datetime
+
+    from PySide6.QtCore import QDateTime
+    from PySide6.QtWidgets import QDateTimeEdit, QDialog, QLabel
+
+    from photo_manager.core.settings import Settings
+    from photo_manager.ui.dialogs import SteamImportDialog
+
+    from .test_steam import make_steam
+
+    root = make_steam(tmp_path / "home")  # screenshots from 01-01-2026, 11-04-2026 9:30:12 PM and 9:30:15 PM
+    s = Settings.load(tmp_path / "s.json")
+    s.steam_path, s.steam_dest = str(root), str(tmp_path / "Camera Roll")
+    dlg = SteamImportDialog(s)
+    assert len(dlg.plan) == 3
+
+    def pick(self):  # the cut-off dialog: choose 11-04-2026 9:30:14 PM and confirm
+        self.findChild(QDateTimeEdit).setDateTime(QDateTime(datetime(2026, 11, 4, 21, 30, 14)))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", pick)
+    dlg._mark_older()
+    assert "2</b> will be marked" in dlg._mark_dialog.findChildren(QLabel)[-1].text()
+    assert [os.path.basename(shot.path) for shot, _ in dlg.plan] == ["20261104213015_1.jpg"]
+    assert [os.path.basename(shot.path) for shot, _ in SteamImportDialog(s).plan] == ["20261104213015_1.jpg"]

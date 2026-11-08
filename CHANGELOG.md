@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.2
+
+- Steam import: **Mark older ones as imported…** for screenshots you already have but moved out of the import
+  folder. Pick a date and time; everything taken before it counts as imported. Shows how many stay new as you pick.
+
 ## 0.11.1
 
 - Fix: Steam import offered screenshots you'd already imported again. Writing Date taken changes the file's

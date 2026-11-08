@@ -559,12 +559,21 @@ class SteamImportDialog(QDialog):
         self.games.setMaximumHeight(150)
         self.games.setColumnWidth(0, 280)
         layout.addWidget(self.games)
+        mark_row = QHBoxLayout()
+        self.mark_btn = QPushButton("Mark older ones as imported…")
+        self.mark_btn.setToolTip("Already have these screenshots (e.g. imported, then moved elsewhere)? "
+                                 "Mark everything taken before a date and time as imported.")
+        self.mark_btn.clicked.connect(self._mark_older)
+        mark_row.addWidget(self.mark_btn)
+        mark_row.addStretch(1)
+        layout.addLayout(mark_row)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.plan: list = []
+        self.shots: list = []
         self.seen_in_dest: set[str] = set()
         self._asked: set[str] = set()  # app ids already looked up in the Steam store
         self._relay = _NamesRelay(self)
@@ -625,11 +634,13 @@ class SteamImportDialog(QDialog):
                                  "Choose your Steam folder (the one that contains “userdata”).</span>")
             self.ok.setEnabled(False)
             self.ok.setText("Import")
+            self.mark_btn.setEnabled(False)
             return
         shots = self._steam.find_screenshots(
             path if self.account.count() else "", self.account.currentData() or None,
             self.extra_folders(), self.settings.steam_game_names)
         self._look_up_names(shots)
+        self.shots = shots
         rows = self._steam.per_game(shots)
         from PySide6.QtWidgets import QTreeWidgetItem
 
@@ -658,7 +669,53 @@ class SteamImportDialog(QDialog):
             text += " Choose where to save them."
         self.summary.setText(text)
         self.ok.setText(f"Import {len(self.plan)}" if dest else "Import")
+        self.mark_btn.setEnabled(bool(self.plan))
         self.ok.setEnabled(bool(dest and self.plan))
+
+    def _mark_older(self) -> None:
+        """One-time catch-up: mark every screenshot taken before a chosen moment as imported."""
+        from datetime import datetime
+
+        from PySide6.QtCore import QDateTime
+        from PySide6.QtWidgets import QDateTimeEdit
+
+        pending = {id(shot) for shot, _ in self.plan}
+        shots = [s for s in self.shots if s.taken and id(s) in pending]
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Mark older ones as imported")
+        layout = QVBoxLayout(dlg)
+        text = QLabel("Screenshots taken <b>before</b> this date and time count as already imported "
+                      "and won't be offered again:")
+        text.setWordWrap(True)
+        layout.addWidget(text)
+        when = QDateTimeEdit()
+        when.setCalendarPopup(True)
+        when.setDisplayFormat("MM-dd-yyyy hh:mm AP")
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        when.setDateTime(QDateTime(today))
+        layout.addWidget(when)
+        count = QLabel()
+        layout.addWidget(count)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Mark as imported")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        def older() -> list:
+            cutoff = when.dateTime().toPython()
+            return [s for s in shots if s.taken < cutoff]
+
+        def recount() -> None:
+            n = len(older())
+            count.setText(f"<b>{n}</b> will be marked as imported; <b>{len(self.plan) - n}</b> stay new.")
+
+        when.dateTimeChanged.connect(lambda _dt: recount())
+        recount()
+        self._mark_dialog = dlg  # for tests
+        if dlg.exec():
+            self._steam.add_to_log(self.log_path(), {self._steam.shot_key(s) for s in older()})
+            self._update()
 
     def log_path(self):  # type: ignore[no-untyped-def]
         """The list of screenshots imported before, next to the settings file."""
