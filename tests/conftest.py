@@ -46,3 +46,11 @@ def close_all_windows():
         widget.deleteLater()
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QApplication.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def no_steam_store(monkeypatch):
+    """Tests never ask the real Steam store for game names."""
+    from photo_manager.core import steam
+
+    monkeypatch.setattr(steam, "fetch_store_names", lambda app_ids, timeout=5.0: {})

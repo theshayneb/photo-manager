@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QTableWidget, QTableWidgetItem,
@@ -478,6 +478,12 @@ class HotkeyDialog(QDialog):
         self.accept()
 
 
+class _NamesRelay(QObject):
+    """Carries Steam store names from the lookup thread back to the UI thread."""
+
+    done = Signal(dict)
+
+
 class SteamImportDialog(QDialog):
     """Pick the Steam folder, account and destination; shows how many screenshots are new."""
 
@@ -513,8 +519,8 @@ class SteamImportDialog(QDialog):
         layout.addLayout(form)
 
         layout.addWidget(QLabel("<b>Also look in</b> (optional):"))
-        hint = QLabel("Missing a game's screenshots? In Steam open <i>View → Screenshots</i>, pick the game, "
-                      "click <i>Show on Disk</i>, and add the folder that opens. Subfolders are included.")
+        hint = QLabel("Add folders with more screenshots, e.g. the folder your Steam Deck's screenshots "
+                      "sync into, or a game's own screenshot folder. Subfolders are included.")
         hint.setWordWrap(True)
         hint.setProperty("hint", True)
         layout.addWidget(hint)
@@ -559,6 +565,9 @@ class SteamImportDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.plan: list = []
+        self._asked: set[str] = set()  # app ids already looked up in the Steam store
+        self._relay = _NamesRelay(self)
+        self._relay.done.connect(self._got_names)
         self._reload_accounts()
 
     def _with_browse(self, edit: QLineEdit, title: str) -> QWidget:
@@ -616,8 +625,10 @@ class SteamImportDialog(QDialog):
             self.ok.setEnabled(False)
             self.ok.setText("Import")
             return
-        shots = self._steam.find_screenshots(path, self.account.currentData() or None, self.extra_folders()) \
-            if self.account.count() else self._steam.find_screenshots("", None, self.extra_folders())
+        shots = self._steam.find_screenshots(
+            path if self.account.count() else "", self.account.currentData() or None,
+            self.extra_folders(), self.settings.steam_game_names)
+        self._look_up_names(shots)
         rows = self._steam.per_game(shots)
         from PySide6.QtWidgets import QTreeWidgetItem
 
@@ -634,6 +645,35 @@ class SteamImportDialog(QDialog):
         self.summary.setText(text)
         self.ok.setText(f"Import {len(self.plan)}" if dest else "Import")
         self.ok.setEnabled(bool(dest and self.plan))
+
+    def _look_up_names(self, shots: list) -> None:
+        """Name games that aren't installed on this PC (e.g. played on a Steam Deck) from the
+        Steam store, in the background; the list refreshes when the names arrive."""
+        missing = [a for a in self._steam.unnamed_app_ids(shots)
+                   if a not in self._asked and a not in self.settings.steam_game_names]
+        if not missing:
+            return
+        self._asked.update(missing)
+        import threading
+
+        relay, fetch = self._relay, self._steam.fetch_store_names
+
+        def work() -> None:
+            names = fetch(missing[:50])
+            try:
+                relay.done.emit(names)
+            except RuntimeError:  # the dialog was closed meanwhile
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _got_names(self, names: dict) -> None:
+        if not names:
+            return
+        self.settings.steam_game_names.update(names)
+        self.settings.save()
+        if any(names.values()):
+            self._update()
 
     def _accept(self) -> None:
         s = self.settings

@@ -80,6 +80,7 @@ class Settings:
     steam_extra_folders: list[str] = field(default_factory=list)
     steam_set_date: bool = True
     steam_keyword: bool = False
+    steam_game_names: dict[str, str] = field(default_factory=dict)  # from the Steam store
     video_autoplay: bool = False
     label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.2
+
+- Steam Deck screenshots: add the folder your Deck's screenshots sync into (e.g. with Syncthing) under
+  **Also look in**. Each game's `<number>\screenshots` folder is recognized, so screenshots get the right game.
+- Games that aren't installed on this PC are named from the Steam store (looked up once, then remembered)
+  instead of showing as "App 2495100".
+
 ## 0.10.1
 
 - Steam import also reads Steam's own screenshot index (`760\screenshots.vdf`), so screenshots a game saved

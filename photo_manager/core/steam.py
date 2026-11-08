@@ -6,12 +6,15 @@ named like 20261104213012_1.jpg (the date and time it was taken, local time).
 A "thumbnails" subfolder holds small copies, which are skipped.
 
 Game names come from Steam's own app manifests (steamapps/appmanifest_<id>.acf)
-in every Steam library folder listed in steamapps/libraryfolders.vdf.
+in every Steam library folder listed in steamapps/libraryfolders.vdf. Games that
+aren't installed on this PC (e.g. screenshots synced from a Steam Deck) can be named
+from the Steam store (fetch_store_names); the caller keeps those names cached.
 """
 
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import sys
@@ -101,6 +104,34 @@ def game_names(steam: str) -> dict[str, str]:
     return names
 
 
+def fetch_store_names(app_ids: list[str], timeout: float = 5.0) -> dict[str, str]:
+    """{app id: name} from the Steam store for games not installed here.
+
+    An id the store doesn't know (e.g. a non-Steam game) maps to "" so it isn't asked
+    again; an id that couldn't be checked (no internet) is left out."""
+    import urllib.request
+
+    found: dict[str, str] = {}
+    for app_id in app_ids:
+        url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&filters=basic"
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8", "replace"))
+        except (OSError, ValueError):
+            continue
+        entry = data.get(app_id) if isinstance(data, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("data", {}).get("name", "") if entry.get("success") else ""
+        found[app_id] = name if isinstance(name, str) else ""
+    return found
+
+
+def unnamed_app_ids(shots: list["Shot"]) -> list[str]:
+    """App ids whose game name isn't known (shown as "App 12345")."""
+    return sorted({s.app_id for s in shots if s.app_id.isdigit() and s.game == f"App {s.app_id}"})
+
+
 # -- screenshots -----------------------------------------------------------------
 
 def taken_from_name(name: str) -> datetime | None:
@@ -165,13 +196,18 @@ def _indexed_files(steam: str, account: str) -> list[tuple[str, str]]:
 
 
 def find_screenshots(steam: str, account: str | None = None,
-                     extra_folders: list[str] | None = None) -> list[Shot]:
+                     extra_folders: list[str] | None = None,
+                     known_names: dict[str, str] | None = None) -> list[Shot]:
     """Every screenshot of one account (or all accounts), oldest first.
 
     Looks in Steam's screenshot folders, in Steam's own screenshot index, and in any
-    extra folders (with their subfolders). The same screenshot found twice is listed once."""
-    names = game_names(steam)
-    ids = [account] if account else accounts(steam)
+    extra folders (with their subfolders). The same screenshot found twice is listed once.
+    An extra folder can be a copy of another device's 760/remote folder (e.g. synced from
+    a Steam Deck): files in <app id>/screenshots/ get that game's name.
+    known_names: extra {app id: name}, e.g. cached names from the Steam store."""
+    names = {k: v for k, v in (known_names or {}).items() if v}
+    names.update(game_names(steam) if steam else {})
+    ids = ([account] if account else accounts(steam)) if steam else []
     shots: list[Shot] = []
     seen: set[str] = set()
 
@@ -195,9 +231,15 @@ def find_screenshots(steam: str, account: str | None = None,
     for folder in extra_folders or []:
         for dirpath, dirnames, filenames in os.walk(folder):
             dirnames[:] = [d for d in dirnames if d.lower() != "thumbnails"]
-            game = os.path.basename(dirpath) if os.path.normcase(dirpath) != os.path.normcase(folder) else "Other"
+            here, parent = os.path.basename(dirpath), os.path.basename(os.path.dirname(dirpath))
+            if here.lower() == "screenshots" and parent.isdigit():  # <app id>/screenshots, Steam's layout
+                app_id, game = parent, names.get(parent, f"App {parent}")
+            elif os.path.normcase(dirpath) != os.path.normcase(folder):
+                app_id, game = "", here
+            else:
+                app_id, game = "", "Other"
             for filename in filenames:
-                add(os.path.join(dirpath, filename), "", game)
+                add(os.path.join(dirpath, filename), app_id, game)
     # A screenshot saved in two places (e.g. Steam's copy + an uncompressed copy) is one screenshot:
     # keep one per file name stem, preferring the bigger (better quality) file.
     best: dict[str, Shot] = {}

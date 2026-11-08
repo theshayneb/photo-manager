@@ -1,6 +1,7 @@
 """End-to-end: the real window, driven offscreen, with the stand-in ExifTool."""
 
 import os
+import time
 from datetime import datetime
 
 import pytest
@@ -1320,3 +1321,33 @@ def test_steam_dialog_lists_games_and_remembers_extra_folders(qapp, tmp_path):
     assert s.steam_extra_folders == [str(tmp_path / "Uncompressed")]
     again = SteamImportDialog(s)
     assert again.extra_folders() == [str(tmp_path / "Uncompressed")]
+
+
+def test_steam_dialog_names_uninstalled_games_from_the_store(qapp, tmp_path, monkeypatch):
+    from photo_manager.core import steam
+    from photo_manager.core.settings import Settings
+    from photo_manager.ui.dialogs import SteamImportDialog
+
+    deck = tmp_path / "Deck" / "1234567" / "screenshots"
+    deck.mkdir(parents=True)
+    (deck / "20261107085800_1.jpg").write_bytes(b"k" * 10)
+    asked = []
+
+    def fake_fetch(app_ids, timeout=5.0):
+        asked.append(list(app_ids))
+        return {"1234567": "Hello Kitty Island Adventure"}
+
+    monkeypatch.setattr(steam, "fetch_store_names", fake_fetch)
+    s = Settings.load(tmp_path / "s.json")
+    s.steam_path, s.steam_dest = "", str(tmp_path / "out")
+    s.steam_extra_folders = [str(tmp_path / "Deck")]
+    dlg = SteamImportDialog(s)
+    deadline = time.time() + 5
+    while dlg.games.topLevelItemCount() and dlg.games.topLevelItem(0).text(0).startswith("App ") \
+            and time.time() < deadline:
+        qapp.processEvents()
+    assert dlg.games.topLevelItem(0).text(0) == "Hello Kitty Island Adventure"
+    assert dlg.plan[0][0].game == "Hello Kitty Island Adventure"
+    assert Settings.load(tmp_path / "s.json").steam_game_names == {"1234567": "Hello Kitty Island Adventure"}
+    SteamImportDialog(s)
+    assert asked == [["1234567"]]  # cached: not asked again

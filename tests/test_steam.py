@@ -121,3 +121,37 @@ def test_extra_folders_and_duplicate_copies(tmp_path):
 def test_parse_vdf_nested_and_escapes():
     data = steam.parse_vdf('"a"\n{\n\t"b"\t"C:\\\\Games\\\\x"\n\t"c"\n\t{\n\t\t"d"\t"1"\n\t}\n}\n')
     assert data == {"a": {"b": "C:\\Games\\x", "c": {"d": "1"}}}
+
+
+def test_synced_steam_deck_folder_uses_app_ids(tmp_path):
+    """A Steam Deck's 760/remote folder synced to the PC: <app id>/screenshots/<file>."""
+    s = make_steam(tmp_path)
+    deck = tmp_path / "SteamDeck"
+    (deck / "440" / "screenshots" / "thumbnails").mkdir(parents=True)
+    (deck / "440" / "screenshots" / "20261107080000_1.jpg").write_bytes(b"d" * 10)
+    (deck / "440" / "screenshots" / "thumbnails" / "20261107080000_1.jpg").write_bytes(b"t")
+    (deck / "1234567" / "screenshots").mkdir(parents=True)
+    (deck / "1234567" / "screenshots" / "20261107085800_1.jpg").write_bytes(b"k" * 10)
+    shots = [x for x in steam.find_screenshots(str(s), "12345", [str(deck)]) if str(deck) in x.path]
+    assert [(x.app_id, x.game) for x in shots] == [("440", "Team Fortress 2"), ("1234567", "App 1234567")]
+    assert steam.unnamed_app_ids(shots) == ["1234567"]
+    named = steam.find_screenshots("", None, [str(deck)], {"1234567": "Hello Kitty Island Adventure", "9": ""})
+    assert [x.game for x in named] == ["App 440", "Hello Kitty Island Adventure"]  # no Steam folder here
+
+
+def test_fetch_store_names_reads_the_store_reply(monkeypatch):
+    import io
+    import json as _json
+    import urllib.request
+
+    monkeypatch.undo()  # put back the real lookup (conftest replaces it with a no-network stand-in)
+    replies = {"1": {"1": {"success": True, "data": {"name": "Game One"}}}, "2": {"2": {"success": False}}}
+
+    def fake_urlopen(url, timeout):
+        app = url.split("appids=")[1].split("&")[0]
+        if app == "3":
+            raise OSError("offline")
+        return io.BytesIO(_json.dumps(replies[app]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert steam.fetch_store_names(["1", "2", "3"]) == {"1": "Game One", "2": ""}  # 3 is asked again later

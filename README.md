@@ -121,6 +121,10 @@ new, and skips ones you've already imported, so you can run it whenever you like
 changed. Ticked by default: **Set Date taken** from the file name (`20261104213012_1.jpg` → 11-04-2026 09:30:12 PM).
 Optional: **add the game's name as a keyword**.
 
+**Steam Deck (or another PC):** its screenshots aren't on this PC. Sync the Deck's
+`/home/deck/.local/share/Steam/userdata/<account>/760/remote` folder to this PC (e.g. with Syncthing) and add the
+synced folder under **Also look in**. Games that aren't installed on this PC are named from the Steam store.
+
 ### Convert (HEIC / WEBP / AVIF → JPG)
 
 Select images and use **Convert…** in the toolbar or right-click → **Convert to JPG…**. Choose JPG (with quality)
