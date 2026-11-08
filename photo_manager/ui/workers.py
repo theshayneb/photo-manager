@@ -45,9 +45,17 @@ class Background:
         self.pool = QThreadPool()
         self.pool.setMaxThreadCount(threads)
         self._relay = _Relay()
+        self.pending = 0  # jobs started whose results haven't been delivered yet
 
     def run(self, fn: Callable[[], Any], callback: Callable[[Any, str | None], None] | None = None) -> None:
-        self.pool.start(_Task(self._relay, fn, callback))
+        self.pending += 1
+
+        def done(result: Any, error: str | None) -> None:
+            self.pending -= 1
+            if callback:
+                callback(result, error)
+
+        self.pool.start(_Task(self._relay, fn, done))
 
     def wait(self, msecs: int = -1) -> bool:
         return self.pool.waitForDone(msecs)

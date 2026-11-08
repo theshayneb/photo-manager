@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3
+
+- The photo list updates by itself when files are added to or removed from the open folder (by Explorer,
+  phone sync, Syncthing…). No more F5. Selection and scroll position are kept.
+- **Steam import…** button on the toolbar.
+
 ## 0.10.2
 
 - Steam Deck screenshots: add the folder your Deck's screenshots sync into (e.g. with Syncthing) under

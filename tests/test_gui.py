@@ -1351,3 +1351,30 @@ def test_steam_dialog_names_uninstalled_games_from_the_store(qapp, tmp_path, mon
     assert Settings.load(tmp_path / "s.json").steam_game_names == {"1234567": "Hello Kitty Island Adventure"}
     SteamImportDialog(s)
     assert asked == [["1234567"]]  # cached: not asked again
+
+
+def test_folder_updates_itself_when_files_are_added_or_removed(window, qapp):
+    win, folder, _ = window
+    win.grid.select_paths([str(folder / "vacation.jpg")])
+    Image.new("RGB", (64, 48), "red").save(folder / "new from phone.jpg")
+    (folder / "Screenshot_20261023-143414.png").unlink()
+    deadline = time.time() + 10
+    names = set()
+    while time.time() < deadline:
+        qapp.processEvents()
+        names = {i.name for i in win.model.all_items}
+        if "new from phone.jpg" in names and "Screenshot_20261023-143414.png" not in names:
+            break
+        time.sleep(0.05)
+    assert names == {"IMG_20261023_000100_358_3.jpg", "vacation.jpg", "new from phone.jpg"}
+    assert win.grid.selected_paths() == [str(folder / "vacation.jpg")]  # selection kept
+    settle(win)
+    assert win.model.item(str(folder / "new from phone.jpg")).meta is not None  # its metadata was read
+
+
+def test_steam_import_is_on_the_toolbar(window):
+    win, _, _ = window
+    from PySide6.QtWidgets import QToolBar
+
+    bar = win.findChild(QToolBar, "main-toolbar")
+    assert "Steam import…" in [a.text() for a in bar.actions()]

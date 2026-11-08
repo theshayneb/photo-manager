@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QDir, QMimeData, QModelIndex, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QDir, QFileSystemWatcher, QMimeData, QModelIndex, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -42,6 +43,7 @@ from ..core import dates, fileops
 from ..core.convert import convert_file, needs_conversion
 from ..core.crop import can_crop, save_crop
 from ..core.exiftool import ExifTool
+from ..core.media import kind as media_kind
 from ..core.metadata import LABELS, READ_TAGS, Meta, parse_meta
 from ..core.settings import Settings, cache_dir
 from ..core.templates import follows_pattern, rename_pattern_regex
@@ -140,6 +142,15 @@ class MainWindow(QMainWindow):
         self._refresh_timer.setInterval(40)
         self._refresh_timer.timeout.connect(self.refresh_sidebar)
         self.viewer: Viewer | None = None
+
+        # Show files added to (or removed from) the open folder by other programs, without F5.
+        self.watcher = QFileSystemWatcher(self)
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setSingleShot(True)
+        self._sync_timer.setInterval(1500)  # wait for copies to settle
+        self._sync_timer.timeout.connect(self.sync_folder)
+        self.watcher.directoryChanged.connect(lambda _path: self._sync_timer.start())
+        self._fresh: dict[str, float] = {}  # files the watcher added recently -> when
 
         if settings.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode()))
@@ -293,6 +304,7 @@ class MainWindow(QMainWindow):
             ("View", "", "Open the viewer (Enter / double-click)", self.open_viewer),
             ("Move to…", "Ctrl+M", "Move selected files to another folder (Ctrl+M)", self.move_selected),
             ("Convert…", "", "Convert selected images to JPG or PNG", self.convert_selected),
+            ("Steam import…", "", "Import new Steam screenshots (also on Tools menu)", self.import_steam),
             ("Delete", "", "Send selected files to the Recycle Bin (Delete)", self.delete_selected),
             ("Show in Explorer", "Ctrl+E", "Show in Windows Explorer (Ctrl+E)", self.show_in_explorer),
             ("Open", "Ctrl+O", "Open in the default Windows app (Ctrl+O)", self.open_external_selected),
@@ -535,6 +547,10 @@ class MainWindow(QMainWindow):
             return
         folder = os.path.normpath(folder)
         self.model.load_folder(folder)
+        if self.watcher.directories():
+            self.watcher.removePaths(self.watcher.directories())
+        self.watcher.addPath(folder)
+        self._fresh.clear()
         self.settings.last_folder = folder
         self.address.setText(folder)
         self._update_fav_button()
@@ -546,6 +562,59 @@ class MainWindow(QMainWindow):
         self._show_count()
         self._load_meta([i.path for i in self.model.items])
         self.refresh_sidebar()
+
+    def sync_folder(self) -> None:
+        """Bring the grid up to date with what's in the open folder now: new files appear and
+        deleted ones disappear, keeping the selection and scroll position."""
+        folder = self.model.folder
+        if not folder:
+            return
+        if self.bg.pending:  # our own rename/move/save is still running: look again afterwards
+            self._sync_timer.start()
+            return
+        if not os.path.isdir(folder):
+            return
+        on_disk: dict[str, tuple[str, os.stat_result]] = {}
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file() and media_kind(entry.name):
+                            on_disk[_key(entry.path)] = (entry.path, entry.stat())
+                    except OSError:
+                        continue
+        except OSError:
+            return
+        known = {_key(i.path): i for i in self.model.all_items}
+        gone = [i.path for k, i in known.items() if k not in on_disk]
+        added = []
+        for k, (path, _st) in on_disk.items():
+            if k not in known and (item := self.model.add_path(path)):
+                added.append(item.path)
+                self._fresh[k] = time.monotonic()
+        # A file that was still being copied when it first appeared: remake its thumbnail.
+        grown = []
+        for k, when in list(self._fresh.items()):
+            item, st = known.get(k), on_disk.get(k, (None, None))[1]
+            if time.monotonic() - when > 120 or st is None:
+                self._fresh.pop(k, None)
+            elif item and (item.size != st.st_size or item.mtime != st.st_mtime):
+                item.size, item.mtime = st.st_size, st.st_mtime
+                grown.append(item.path)
+        if not added and not gone and not grown:
+            return
+        if gone:
+            keys = {_key(p) for p in gone}
+            self.model.all_items = [i for i in self.model.all_items if _key(i.path) not in keys]
+        if added or gone:
+            self.regroup()
+            self._show_count()
+        for path in grown:
+            self.model.reload_thumb(path)
+        if added or grown:
+            self._load_meta(added + grown)
+        if gone:
+            self._schedule_refresh()
 
     def _show_count(self) -> None:
         n = len(self.model.items)
@@ -590,7 +659,7 @@ class MainWindow(QMainWindow):
             done, failures = result
             here = os.path.normcase(os.path.normpath(self.model.folder or ""))
             if any(os.path.normcase(os.path.dirname(t)) == here for _, t in done):
-                self.open_folder(self.model.folder)
+                self.sync_folder()
             self.status.setText(f"Imported {len(done)} Steam screenshot(s) into {dest}")
             self.steam_import_result = (done, failures)
             if getattr(self, "quiet_steam_import", False):
