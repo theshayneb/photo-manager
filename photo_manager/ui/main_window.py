@@ -640,6 +640,7 @@ class MainWindow(QMainWindow):
         from ..core.metadata import date_args, keyword_args
 
         plan = dlg.plan
+        log, seen = dlg.log_path(), dlg.seen_in_dest
         dest = self.settings.steam_dest
         set_date, add_keyword = self.settings.steam_set_date, self.settings.steam_keyword
         et = self.et
@@ -647,6 +648,9 @@ class MainWindow(QMainWindow):
 
         def work():  # type: ignore[no-untyped-def]
             done, failures = steam.import_shots(plan)
+            # Remember what's imported, so it isn't imported again even after it's renamed,
+            # dated (which changes the file) or moved elsewhere.
+            steam.add_to_log(log, seen | {steam.shot_key(shot) for shot, _ in done})
             if et is not None:
                 for shot, target in done:
                     if set_date and shot.taken:

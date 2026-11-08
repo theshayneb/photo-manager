@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.1
+
+- Fix: Steam import offered screenshots you'd already imported again. Writing Date taken changes the file's
+  size, and the check compared name and size. Imports are now remembered (in `steam_imported.txt` next to the
+  settings), and screenshots still in the folder are recognized by their Steam name or, after renaming by date,
+  by the date and time in their new name. Moving them elsewhere later doesn't make them "new" either.
+
 ## 0.11.0
 
 - Slimmer Details panel (about 280 px instead of 450): smaller label swatches, **⊘** for None, keyword buttons

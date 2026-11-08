@@ -565,6 +565,7 @@ class SteamImportDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.plan: list = []
+        self.seen_in_dest: set[str] = set()
         self._asked: set[str] = set()  # app ids already looked up in the Steam store
         self._relay = _NamesRelay(self)
         self._relay.done.connect(self._got_names)
@@ -638,13 +639,30 @@ class SteamImportDialog(QDialog):
         games = len(rows)
         text = f"{len(shots)} screenshot{'s' if len(shots) != 1 else ''} from {games} game{'s' if games != 1 else ''}."
         if dest:
-            self.plan = self._steam.plan_import(shots, dest)
-            text += f" <b>{len(self.plan)} new</b> to import."
+            from ..core.templates import match_any
+
+            templates = self.settings.templates
+
+            def date_of_name(name: str):  # type: ignore[no-untyped-def]
+                found = match_any(templates, name)
+                return found[1] if found else None
+
+            # Imported before: in the log, or still in the folder (even if renamed or dated since).
+            self.seen_in_dest = self._steam.found_in_dest(shots, dest, date_of_name)
+            skip = self._steam.load_log(self.log_path()) | self.seen_in_dest
+            self.plan = self._steam.plan_import(shots, dest, skip)
+            done = len(shots) - len(self.plan)
+            text += f" <b>{len(self.plan)} new</b> to import"
+            text += f" ({done} imported before)." if done else "."
         else:
             text += " Choose where to save them."
         self.summary.setText(text)
         self.ok.setText(f"Import {len(self.plan)}" if dest else "Import")
         self.ok.setEnabled(bool(dest and self.plan))
+
+    def log_path(self):  # type: ignore[no-untyped-def]
+        """The list of screenshots imported before, next to the settings file."""
+        return self.settings.path.parent / "steam_imported.txt"
 
     def _look_up_names(self, shots: list) -> None:
         """Name games that aren't installed on this PC (e.g. played on a Steam Deck) from the

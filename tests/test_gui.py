@@ -1293,8 +1293,12 @@ def test_import_steam_screenshots_end_to_end(window, tmp_path, monkeypatch):
     assert meta.keywords == ["Team Fortress 2"]
 
     # Running it again finds nothing new.
+    for f in dest.iterdir():  # real ExifTool rewrites the file when it saves the date: size changes
+        if f.suffix.lower() in (".jpg", ".png"):
+            f.write_bytes(f.read_bytes() + b"date written")
     again = SteamImportDialog(win.settings)
     assert again.plan == [] and not again.ok.isEnabled()
+    assert "imported before" in again.summary.text()
     assert again.dest.text() == str(dest)  # the folder is remembered
 
 

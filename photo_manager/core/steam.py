@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from .fileops import unique_path
 
@@ -272,15 +273,71 @@ def per_game(shots: list[Shot]) -> list[tuple[str, int, datetime | None]]:
     return rows
 
 
-def plan_import(shots: list[Shot], dest: str) -> list[tuple[Shot, str]]:
+def shot_key(shot: Shot) -> str:
+    """What identifies a screenshot across imports: Steam's own name (date, time and number,
+    e.g. 20261104213012_1), or for other names the name plus size."""
+    stem = os.path.splitext(os.path.basename(shot.path))[0].lower()
+    if _NAME.match(stem):
+        return stem
+    try:
+        return f"{os.path.basename(shot.path).lower()}:{os.path.getsize(shot.path)}"
+    except OSError:
+        return os.path.basename(shot.path).lower()
+
+
+def load_log(path: Path) -> set[str]:
+    """Screenshots imported before (keys from shot_key), one per line."""
+    try:
+        return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
+    except OSError:
+        return set()
+
+
+def add_to_log(path: Path, keys: set[str] | list[str]) -> None:
+    new = set(keys) - load_log(path)
+    if not new:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.writelines(k + "\n" for k in sorted(new))
+
+
+def found_in_dest(shots: list[Shot], dest: str,
+                  date_of_name: Callable[[str], datetime | None] | None = None) -> set[str]:
+    """Keys of screenshots that are already in dest, even if they were changed or renamed since:
+    same Steam name (Date taken written into it changes the size), or a name that says the same
+    date and time to the second (renamed by date, e.g. "11-07-2026 08-58-00 AM.jpg")."""
+    try:
+        names = [e.name for e in os.scandir(dest) if e.is_file()]
+    except OSError:
+        return set()
+    stems = {os.path.splitext(n)[0].lower() for n in names}
+    named_dates: set[datetime] = set()
+    if date_of_name:
+        for name in names:
+            if not _NAME.match(name):
+                dt = date_of_name(name)
+                if dt is not None:
+                    named_dates.add(dt.replace(microsecond=0))
+    found = set()
+    for shot in shots:
+        stem = os.path.splitext(os.path.basename(shot.path))[0].lower()
+        if stem in stems or (shot.taken is not None and shot.taken in named_dates):
+            found.add(shot_key(shot))
+    return found
+
+
+def plan_import(shots: list[Shot], dest: str, skip: set[str] | None = None) -> list[tuple[Shot, str]]:
     """[(shot, destination path)] for the screenshots not imported yet. Everything goes
     straight into dest (no subfolders).
 
-    A screenshot counts as already imported when a file with the same name and size
-    is in dest. Same name but different size gets "_1" etc."""
+    skip: keys (shot_key) of screenshots imported before. Also skipped: a file with the same
+    name and size already in dest. Same name but a different screenshot gets "_1" etc."""
     plan: list[tuple[Shot, str]] = []
     taken: set[str] = set()
     for shot in shots:
+        if skip and shot_key(shot) in skip:
+            continue
         target = Path(dest) / Path(shot.path).name
         try:
             if target.exists() and target.stat().st_size == os.path.getsize(shot.path):
