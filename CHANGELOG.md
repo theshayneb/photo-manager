@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+- Slimmer Details panel (about 280 px instead of 450): smaller label swatches, **⊘** for None, keyword buttons
+  in 2 columns, shorter captions, the file-name preview lists only appear once photos are selected, and the
+  rename placeholders moved behind a **?** button. Same sections in the same order. The panel is narrowed
+  once on first start; drag its edge to make it wider again.
+
 ## 0.10.3
 
 - The photo list updates by itself when files are added to or removed from the open folder (by Explorer,

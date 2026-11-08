@@ -506,8 +506,8 @@ def test_keyword_buttons_are_equal_size_boxes(window):
     widths = {b.width() for b in panel.buttons.values()}
     assert max(widths) - min(widths) <= 1  # every box the same width (±1px rounding)
     me = panel.grid.getItemPosition(panel.grid.indexOf(panel.buttons["me"]))[:2]
-    queens = panel.grid.getItemPosition(panel.grid.indexOf(panel.buttons["queens"]))[:2]
-    assert me == (0, 0) and queens == (1, 0)  # 3 per row, in set order
+    new_york = panel.grid.getItemPosition(panel.grid.indexOf(panel.buttons["new york"]))[:2]
+    assert me == (0, 0) and new_york == (1, 0)  # 2 per row (narrow panel), in set order
 
 
 def test_rename_default_is_us_format(window, tmp_path):

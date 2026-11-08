@@ -156,6 +156,9 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode()))
         if settings.window_state:
             self.restoreState(QByteArray.fromBase64(settings.window_state.encode()))
+        if "compact-panel" not in settings.migrations:  # 0.11: the Details panel got narrower
+            self.resizeDocks([self.details_dock], [280], Qt.Orientation.Horizontal)
+            settings.migrations.append("compact-panel")
         if not self.exiftool_ok:
             self.sidebar.warning.setText(
                 "ExifTool wasn't found, so dates, keywords and labels can't be read or saved. "
@@ -225,7 +228,7 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self.sidebar)
-        scroll.setMinimumWidth(340)
+        scroll.setMinimumWidth(275)  # the label row plus room for a scroll bar
         self.details_dock = QDockWidget("Details", self)
         self.details_dock.setObjectName("details")
         self.details_dock.setTitleBarWidget(QWidget())

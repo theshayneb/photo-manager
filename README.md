@@ -69,7 +69,7 @@ match, e.g. *HEIC* + *Needs rename* = HEIC files that need renaming. **Clear fil
 
 - Click a button to add that keyword to all selected photos. Click it again to remove it.
   - **Filled** button: every selected photo has it. **Dashed**: some do.
-- Type in **"Click here to add keywords"** and press Enter to add new ones (comma-separated). They also become buttons.
+- Type in **"Add keywords…"** and press Enter to add new ones (comma-separated). They also become buttons.
 - Switch between keyword **sets** with the dropdown; **⋯** creates, edits or deletes sets.
   **Edit this set…** renames the set and lets you rename, reorder (drag), add and remove its keywords.
 - Right-click a button to remove it from the set (photos keep their keywords).
@@ -149,7 +149,7 @@ To rename a single file by hand, right-click it → **Rename…** or press **F2*
 ### Labels
 
 The **Labels** panel has the five colors (one per photo), two on/off labels that work alongside the color,
-**⭐ Star** and **🔖 Bookmark**, and **None**, which removes all of them. They show on the thumbnails. Star is saved as a 5-star rating, so Windows
+**⭐ Star** and **🔖 Bookmark**, and **⊘ None**, which removes all of them. They show on the thumbnails. Star is saved as a 5-star rating, so Windows
 Explorer and Lightroom see it too; Bookmark is only shown in this app.
 
 ## What can be written where

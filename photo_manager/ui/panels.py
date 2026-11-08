@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QToolButton,
+    QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QToolButton, QToolTip,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -100,7 +100,7 @@ class InfoPanel(QWidget):
         item = items[0]
         if item.thumb is not None:
             self.preview.setPixmap(item.thumb.scaled(
-                300, 170, Qt.AspectRatioMode.KeepAspectRatio,
+                240, 150, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))
         else:
             self.preview.setText("No preview")
@@ -128,12 +128,12 @@ class LabelPanel(QWidget):
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
-        row = QHBoxLayout()  # everything on one row: colors, None, ★, 🔖, hotkeys
-        row.setSpacing(4)
+        row = QHBoxLayout()  # everything on one row: colors, ★, 🔖, None, hotkeys
+        row.setSpacing(3)
         self.buttons: dict[str, QPushButton] = {}
         for label in LABELS:
             btn = QPushButton()
-            btn.setFixedSize(30, 20)
+            btn.setFixedSize(20, 18)
             btn.setCheckable(True)
             color = LABEL_COLORS[label].name()
             btn.setStyleSheet(
@@ -142,19 +142,19 @@ class LabelPanel(QWidget):
             btn.clicked.connect(lambda _=False, name=label: self.apply(name))
             row.addWidget(btn)
             self.buttons[label] = btn
-        row.addSpacing(6)
+        row.addSpacing(3)
         self.flag_buttons: dict[str, QPushButton] = {}
         for flag, text in (("Star", "⭐"), ("Bookmark", "🔖")):
             btn = QPushButton(text)
-            btn.setFixedSize(30, 22)  # icon only, like the color squares; the name is in the tooltip
+            btn.setFixedSize(24, 22)  # icon only, like the color squares; the name is in the tooltip
             btn.setCheckable(True)
             btn.setProperty("flag", True)
             btn.clicked.connect(lambda _=False, f=flag: self.toggle_flag(f))
             row.addWidget(btn)
             self.flag_buttons[flag] = btn
-        row.addSpacing(6)
-        self.clear = QPushButton("None")
-        self.clear.setProperty("compact", True)
+        self.clear = QPushButton("⊘")  # None: icon only; the name is in the tooltip
+        self.clear.setFixedSize(24, 22)
+        self.clear.setProperty("flag", True)
         self.clear.clicked.connect(self.clear_all)
         row.addWidget(self.clear)
         row.addStretch(1)
@@ -162,6 +162,7 @@ class LabelPanel(QWidget):
         hotkeys.setText("⌨")
         hotkeys.setToolTip("Label hotkeys…")
         hotkeys.setAutoRaise(True)
+        hotkeys.setFixedSize(22, 22)
         hotkeys.clicked.connect(ctl.edit_label_hotkeys)
         row.addWidget(hotkeys)
         layout.addLayout(row)
@@ -175,7 +176,7 @@ class LabelPanel(QWidget):
 
         for label, btn in self.buttons.items():
             btn.setToolTip(tip(label, label))
-        self.clear.setToolTip(tip("None", "Remove all labels (color, star and bookmark)"))
+        self.clear.setToolTip(tip("None", "None: remove all labels (color, star and bookmark)"))
         self.flag_buttons["Star"].setToolTip(tip("Star", "Star (saved as a 5-star rating)"))
         self.flag_buttons["Bookmark"].setToolTip(tip("Bookmark", "Bookmark"))
 
@@ -234,7 +235,8 @@ class DatePanel(QWidget):
 
         row = QHBoxLayout()
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText("Type a date, e.g. 6/14/24 6:32 pm")
+        self.edit.setPlaceholderText("e.g. 6/14/24 6:32 pm")
+        self.edit.setToolTip("Type a date and time, then press Enter or Set")
         self.edit.textChanged.connect(self._update_parsed)
         self.edit.returnPressed.connect(self.apply_typed)
         self.apply_btn = QPushButton("Set")
@@ -245,23 +247,22 @@ class DatePanel(QWidget):
         self.parsed = _hint("")
         layout.addWidget(self.parsed)
 
-        self.file_dates = QCheckBox("Also set Windows Created/Modified dates")
+        self.file_dates = QCheckBox("Also set Windows dates")
+        self.file_dates.setToolTip("Also set the Windows Created and Modified dates to the same date")
         self.file_dates.setChecked(ctl.settings.set_file_dates)
         self.file_dates.toggled.connect(self._toggle_file_dates)
         layout.addWidget(self.file_dates)
 
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(line)
-
-        layout.addWidget(QLabel("<b>From filename</b>"))
         row = QHBoxLayout()
         self.template_combo = QComboBox()
         self.template_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.template_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.template_combo.setMinimumContentsLength(8)
+        self.template_combo.setToolTip("Which filename template to read the date with (Auto tries every one)")
         self.template_combo.currentIndexChanged.connect(lambda _i: self._update_filename_preview())
         edit_templates = QToolButton()
         edit_templates.setText("Edit…")
+        edit_templates.setToolTip("Edit filename templates")
         edit_templates.clicked.connect(ctl.edit_templates)
         row.addWidget(self.template_combo, 1)
         row.addWidget(edit_templates)
@@ -271,9 +272,10 @@ class DatePanel(QWidget):
         self.preview.setHeaderLabels(["File", "New date taken"])
         self.preview.setRootIsDecorated(False)
         self.preview.setFixedHeight(60)
-        self.preview.setColumnWidth(0, 150)
+        self.preview.setColumnWidth(0, 120)
+        self.preview.setVisible(False)  # shown once photos are selected
         layout.addWidget(self.preview)
-        self.filename_btn = QPushButton("Set date from filename")
+        self.filename_btn = QPushButton("Set from filename")
         self.filename_btn.clicked.connect(self.apply_filename)
         layout.addWidget(self.filename_btn)
         self._filename_plan: dict[str, datetime] = {}
@@ -285,9 +287,9 @@ class DatePanel(QWidget):
         current = self.template_combo.currentText()
         self.template_combo.blockSignals(True)
         self.template_combo.clear()
-        self.template_combo.addItem("Auto (try every template)")
+        self.template_combo.addItem("From filename: Auto")
         for template in self.ctl.settings.templates:
-            self.template_combo.addItem(template.name)
+            self.template_combo.addItem(f"From filename: {template.name}")
         idx = self.template_combo.findText(current)
         self.template_combo.setCurrentIndex(max(0, idx))
         self.template_combo.blockSignals(False)
@@ -368,8 +370,9 @@ class DatePanel(QWidget):
         if len(self.items) > PREVIEW_ROWS:
             self.preview.addTopLevelItem(QTreeWidgetItem([f"…and {len(self.items) - PREVIEW_ROWS} more", ""]))
         _fit_tree(self.preview)
+        self.preview.setVisible(bool(self.items))
         n = len([p for p in self._filename_plan if metadata_writable(p)])
-        self.filename_btn.setText(f"Set date from filename ({n} file{'s' if n != 1 else ''})")
+        self.filename_btn.setText(f"Set from filename ({n} file{'s' if n != 1 else ''})")
         self.filename_btn.setEnabled(n > 0 and self.ctl.exiftool_ok)
 
     # -- actions --
@@ -397,11 +400,20 @@ class DatePanel(QWidget):
 # --------------------------------------------------------------------------
 
 RENAME_SOURCES = {
-    "taken": "Date taken (EXIF DateTimeOriginal)",
-    "created": "EXIF Create Date (digitized)",
-    "file_created": "Windows Created date",
-    "file_modified": "Windows Modified date",
+    "taken": "Use: Date taken",
+    "created": "Use: EXIF Create Date",
+    "file_created": "Use: Windows Created",
+    "file_modified": "Use: Windows Modified",
 }
+RENAME_SOURCE_TIPS = {
+    "taken": "Date taken (EXIF DateTimeOriginal)",
+    "created": "EXIF Create Date (when it was digitized)",
+    "file_created": "The Windows Created date",
+    "file_modified": "The Windows Modified date",
+}
+PATTERN_HELP = ("<b>Placeholders</b><br>{YYYY} {YY} year · {MM} month · {DD} day<br>"
+                "{HH} hour 00–23 · {hh} hour 01–12 with {AMPM}<br>{mm} minute · {ss} second<br>"
+                "{name} = the current name")
 
 
 def rename_date(item: Item, source: str) -> datetime | None:
@@ -423,28 +435,39 @@ class RenamePanel(QWidget):
         self.ctl = ctl
         self.items: list[Item] = []
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Date to use:"))
         self.source = QComboBox()
+        self.source.setToolTip("Which date to name the files by")
         for key, label in RENAME_SOURCES.items():
             self.source.addItem(label, key)
+            self.source.setItemData(self.source.count() - 1, RENAME_SOURCE_TIPS[key], Qt.ItemDataRole.ToolTipRole)
         self.source.setCurrentIndex(max(0, self.source.findData(ctl.settings.rename_source)))
         self.source.currentIndexChanged.connect(self._source_changed)
         layout.addWidget(self.source)
-        layout.addWidget(QLabel("New name:"))
         self.pattern = QComboBox()
         self.pattern.setEditable(True)
         self.pattern.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.pattern.setToolTip("Pick a saved pattern or type your own. Patterns you use are added to this list.")
         self.pattern.addItems(ctl.settings.rename_presets)
         self.pattern.setCurrentText(ctl.settings.rename_pattern)
+        self.pattern.lineEdit().setCursorPosition(0)  # show the start of a long pattern
         self.pattern.editTextChanged.connect(self._changed)
-        layout.addWidget(self.pattern)
-        layout.addWidget(_hint("{YYYY} {YY} {MM} {DD} {HH} {mm} {ss} · {hh} {AMPM} for 12-hour · "
-                               "{name} = current name"))
+        self.pattern.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.pattern.setMinimumContentsLength(10)
+        self.pattern.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setToolTip(PATTERN_HELP)
+        help_btn.clicked.connect(lambda: QToolTip.showText(
+            help_btn.mapToGlobal(help_btn.rect().bottomLeft()), PATTERN_HELP, help_btn))
+        self.help_btn = help_btn
+        row = QHBoxLayout()
+        row.addWidget(self.pattern, 1)
+        row.addWidget(help_btn)
+        layout.addLayout(row)
         self.preview = QTreeWidget()
         self.preview.setHeaderLabels(["File", "New name"])
         self.preview.setRootIsDecorated(False)
-        self.preview.setColumnWidth(0, 150)
+        self.preview.setColumnWidth(0, 120)
         self.preview.setFixedHeight(60)
         layout.addWidget(self.preview)
         self.example = _hint("")
@@ -529,7 +552,7 @@ class RenamePanel(QWidget):
 # --------------------------------------------------------------------------
 
 class KeywordPanel(QWidget):
-    COLUMNS = 3
+    COLUMNS = 2
 
     def __init__(self, ctl: Controller):
         super().__init__()
@@ -538,7 +561,7 @@ class KeywordPanel(QWidget):
         layout = QVBoxLayout(self)
 
         self.add_edit = QLineEdit()
-        self.add_edit.setPlaceholderText("Click here to add keywords")
+        self.add_edit.setPlaceholderText("Add keywords…")
         self.add_edit.setToolTip("Adds to the selected files and to this set. Separate several with commas.")
         self.add_edit.returnPressed.connect(self._add_typed)
         layout.addWidget(self.add_edit)
@@ -798,7 +821,7 @@ class Sidebar(QWidget):
         super().__init__()
         self.ctl = ctl
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 6, 6, 6)
         self.warning = QLabel()
         self.warning.setWordWrap(True)
         self.warning.setStyleSheet("background:#5c2b00;color:white;padding:6px;border-radius:4px;")
