@@ -84,6 +84,7 @@ class Settings:
     video_sources: list[str] = field(default_factory=list)  # Import videos: folders to copy from
     video_dest: str = ""
     video_move: bool = False
+    video_tidy_names: bool = True  # Title.of.Movie.2019.1080p… -> Title of Movie (2019)
     video_autoplay: bool = False
     label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"

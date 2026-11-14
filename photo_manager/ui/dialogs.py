@@ -825,15 +825,22 @@ class VideoImportDialog(QDialog):
         self.move_box.setToolTip("Files removed from a network folder don't go to a Recycle Bin.")
         self.move_box.setChecked(settings.video_move)
         layout.addWidget(self.move_box)
+        self.tidy_box = QCheckBox("Tidy movie names:  Title.of.Movie.2019.1080p.BluRay… → Title of Movie (2019)")
+        self.tidy_box.setToolTip("Keeps the title and year and drops everything after the year. "
+                                 "Names without a year are left as they are.")
+        self.tidy_box.setChecked(settings.video_tidy_names)
+        self.tidy_box.toggled.connect(lambda _on: self._replan())
+        layout.addWidget(self.tidy_box)
 
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         self.folders = QTreeWidget()
-        self.folders.setHeaderLabels(["Folder", "New videos", "Size"])
+        self.folders.setHeaderLabels(["Video", "Saved as", "Size"])
         self.folders.setRootIsDecorated(False)
-        self.folders.setMaximumHeight(150)
-        self.folders.setColumnWidth(0, 320)
+        self.folders.setMinimumHeight(180)
+        self.folders.setColumnWidth(0, 250)
+        self.folders.setColumnWidth(1, 220)
         layout.addWidget(self.folders)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -924,21 +931,27 @@ class VideoImportDialog(QDialog):
             self.summary.setText(text + " Choose where to save them.")
             self.ok.setEnabled(False)
             return
-        self.plan = self._fi.plan_import(self.videos, dest, self._fi.load_log(self.log_path()))
+        self.plan = self._fi.plan_import(self.videos, dest, self._fi.load_log(self.log_path()),
+                                         self.tidy_box.isChecked())
         done = n - len(self.plan)
         size = sum(v.size for v, _ in self.plan)
         text += f" <b>{len(self.plan)} new</b> to import ({_size(size)})"
         text += f", {done} imported before." if done else "."
         self.summary.setText(text)
-        by_folder: dict[str, list] = {}
-        for video, _target in self.plan:
-            by_folder.setdefault(os.path.dirname(video.path), []).append(video)
         from PySide6.QtWidgets import QTreeWidgetItem
 
-        for folder, vids in sorted(by_folder.items()):
-            item = QTreeWidgetItem([folder, str(len(vids)), _size(sum(v.size for v in vids))])
-            item.setToolTip(0, folder)
-            self.folders.addTopLevelItem(item)
+        rows = []
+        for video, target in self.plan[:500]:
+            old, new = os.path.basename(video.path), os.path.basename(target)
+            item = QTreeWidgetItem([old, new if new != old else "(same name)", _size(video.size)])
+            item.setToolTip(0, video.path)
+            item.setToolTip(1, new)
+            if new == old:
+                item.setForeground(1, Qt.GlobalColor.gray)
+            rows.append(item)
+        self.folders.addTopLevelItems(rows)
+        if len(self.plan) > 500:
+            self.folders.addTopLevelItem(QTreeWidgetItem([f"…and {len(self.plan) - 500} more", "", ""]))
         self.ok.setText(f"Import {len(self.plan)}")
         self.ok.setEnabled(bool(self.plan))
 
@@ -947,6 +960,7 @@ class VideoImportDialog(QDialog):
         s.video_sources = self.source_folders()
         s.video_dest = self.dest.text().strip()
         s.video_move = self.move_box.isChecked()
+        s.video_tidy_names = self.tidy_box.isChecked()
         if s.video_move and QMessageBox.question(
                 self, "Move videos",
                 f"Move {len(self.plan)} videos? They'll be removed from the original folders "

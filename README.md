@@ -133,6 +133,10 @@ a mapped drive or a `\\server\share` path. Both lists are remembered, and videos
 (even after you rename or move them), so you can run it whenever you like. It copies by default; tick **Move** to
 remove them from the original folders (files deleted from a network folder can't be restored from the Recycle Bin).
 
+**Tidy movie names** (ticked by default) saves `Title.of.Movie.2019.1080p.BluRay.x264-GRP.mkv` as
+`Title of Movie (2019).mkv`, the naming Plex, Jellyfin and Kodi expect. Names without a year are kept as they are.
+The list shows each video and the name it will be saved as before you import.
+
 ### Convert (HEIC / WEBP / AVIF → JPG)
 
 Select images and use **Convert…** in the toolbar or right-click → **Convert to JPG…**. Choose JPG (with quality)

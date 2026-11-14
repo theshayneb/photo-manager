@@ -6,6 +6,7 @@ is remembered in a small log, so each run only brings in videos that are new sin
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,39 @@ class Found:
     path: str
     size: int
     mtime: float
+
+
+_SEPARATORS = re.compile(r"[.\s_()\[\]{}]+")
+_LEADING_TAGS = re.compile(r"^\s*(\[[^\]]*\]\s*|\{[^}]*\}\s*)+")
+
+
+def movie_name(filename: str, this_year: int | None = None) -> str | None:
+    """Tidy a downloaded movie's file name: "Title.of.Movie.2019.1080p.BluRay.x264-GRP.mkv"
+    -> "Title of Movie (2019).mkv". Everything after the year is dropped. None when the name
+    has no year after a title (it's left as it is)."""
+    import datetime
+
+    stem, ext = os.path.splitext(filename)
+    if ext.lower() not in {".mp4", ".m4v", ".mov", ".3gp", ".avi", ".mkv", ".wmv", ".webm",
+                           ".mts", ".m2ts", ".mpg", ".mpeg", ".flv"}:
+        stem, ext = filename, ""
+    stem = _LEADING_TAGS.sub("", stem)  # "[YTS] Title..." -> "Title..."
+    tokens = [t for t in _SEPARATORS.split(stem) if t]
+    latest = (this_year or datetime.date.today().year) + 1
+    def is_year(token: str) -> bool:
+        return token.isdigit() and len(token) == 4 and 1900 <= int(token) <= latest
+
+    # The year is the first year-like word after the title, so a title that is or contains a
+    # number still works: "1917.2019", "2001.A.Space.Odyssey.1968", "Blade.Runner.2049.2017";
+    # when two years follow each other, the first is part of the title: "Wonder.Woman.1984.2020".
+    for i in range(1, len(tokens)):
+        if is_year(tokens[i]):
+            while i + 1 < len(tokens) and is_year(tokens[i + 1]):
+                i += 1
+            title = " ".join(t for t in tokens[:i] if t != "-").strip(" -")
+            if title:
+                return f"{title} ({tokens[i]}){ext}"
+    return None
 
 
 def file_key(name: str, size: int) -> str:
@@ -62,22 +96,25 @@ def find_videos(folders: list[str], exclude: str = "",
     return found
 
 
-def plan_import(videos: list[Found], dest: str, skip: set[str] | None = None) -> list[tuple[Found, str]]:
+def plan_import(videos: list[Found], dest: str, skip: set[str] | None = None,
+                tidy_names: bool = False) -> list[tuple[Found, str]]:
     """[(video, destination path)] for videos not imported yet. Already imported: in skip
     (keys from file_key), or a file with the same name and size is in dest. A different
-    video with the same name gets "_1" etc."""
+    video with the same name gets "_1" etc. tidy_names: name movies "Title (Year).ext"."""
     plan: list[tuple[Found, str]] = []
     taken: set[str] = set()
     for video in videos:
         name = os.path.basename(video.path)
         if skip and file_key(name, video.size) in skip:
             continue
-        target = Path(dest) / name
+        new_name = (movie_name(name) or name) if tidy_names else name
         try:
-            if target.exists() and target.stat().st_size == video.size:
+            if any(t.exists() and t.stat().st_size == video.size
+                   for t in {Path(dest) / name, Path(dest) / new_name}):
                 continue
         except OSError:
             continue
+        target = Path(dest) / new_name
         final = unique_path(target, taken)
         taken.add(os.path.normcase(str(final)))
         plan.append((video, str(final)))

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0
+
+- Video import: **Tidy movie names** (on by default, remembered). `Title.of.Movie.2019.1080p.BluRay.x264-GRP.mkv`
+  is saved as `Title of Movie (2019).mkv`: the title and year are kept, everything after the year is dropped,
+  and dots/underscores become spaces. Handles `[YTS] …` tags, `(1999)` already in brackets, and titles that are or
+  contain numbers (`1917`, `2001 A Space Odyssey`, `Blade Runner 2049`, `Wonder Woman 1984`). Names without a year
+  are left as they are. The list now shows every video with the name it will be saved as.
+
 ## 0.12.0
 
 - **Video import…** (toolbar, and Tools → Import videos from folders…): brings the videos from one or more

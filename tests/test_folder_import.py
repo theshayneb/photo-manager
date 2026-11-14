@@ -65,3 +65,37 @@ def test_cancel_stops_between_files(tmp_path):
     plan = fi.plan_import(fi.find_videos([str(share)]), str(tmp_path / "out"))
     done, _ = fi.import_files(plan, cancelled=lambda: True)
     assert done == []
+
+
+def test_movie_names_are_tidied():
+    cases = {
+        "Title.of.Movie.2019.1080p.BluRay.x264-GROUP.mkv": "Title of Movie (2019).mkv",
+        "The_Big_Lebowski_1998_720p.avi": "The Big Lebowski (1998).avi",
+        "[YTS.MX] The Matrix (1999) [1080p].mp4": "The Matrix (1999).mp4",
+        "Movie Name - 2015 - 720p.mkv": "Movie Name (2015).mkv",
+        "Ocean's.Eleven.2001.DVDRip.avi": "Ocean's Eleven (2001).avi",
+        "Spider-Man.No.Way.Home.2021.1080p.mkv": "Spider-Man No Way Home (2021).mkv",
+        # Titles that are or contain numbers:
+        "1917.2019.1080p.WEB.mp4": "1917 (2019).mp4",
+        "2001.A.Space.Odyssey.1968.REMASTERED.2160p.mkv": "2001 A Space Odyssey (1968).mkv",
+        "Blade.Runner.2049.2017.1080p.mkv": "Blade Runner 2049 (2017).mkv",  # 2049 is in the future
+        "Wonder.Woman.1984.2020.1080p.mkv": "Wonder Woman 1984 (2020).mkv",
+        "Title.2019.Directors.Cut.2020.Remaster.mkv": "Title (2019).mkv",
+    }
+    for name, tidy in cases.items():
+        assert fi.movie_name(name, this_year=2026) == tidy, name
+    for name in ("Holiday Video.mp4", "Show.S01E02.720p.mkv", "2019.mp4"):  # no title + year: untouched
+        assert fi.movie_name(name, this_year=2026) is None, name
+
+
+def test_import_with_tidy_names(tmp_path):
+    share = tmp_path / "Movies"
+    (share / "New").mkdir(parents=True)
+    (share / "New" / "Title.of.Movie.2019.1080p.BluRay.x264-GRP.mkv").write_bytes(b"m" * 10)
+    (share / "Home video.mp4").write_bytes(b"h" * 5)
+    dest = tmp_path / "out"
+    plan = fi.plan_import(fi.find_videos([str(share)]), str(dest), tidy_names=True)
+    assert sorted(Path(t).name for _, t in plan) == ["Home video.mp4", "Title of Movie (2019).mkv"]
+    fi.import_files(plan)
+    # Already there under its tidy name: not imported again, even without the log.
+    assert fi.plan_import(fi.find_videos([str(share)]), str(dest), tidy_names=True) == []

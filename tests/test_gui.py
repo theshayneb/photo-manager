@@ -1429,7 +1429,7 @@ def test_import_videos_end_to_end(window, tmp_path, monkeypatch):
     while dlg.scanning and time.time() < deadline:
         QApplication.processEvents()
     assert len(dlg.plan) == 3 and "3 new" in dlg.summary.text() and dlg.ok.isEnabled()
-    assert dlg.folders.topLevelItemCount() == 3  # one row per subfolder
+    assert dlg.folders.topLevelItemCount() == 3  # one row per video
 
     def run_dialog(self):
         deadline = time.time() + 5
