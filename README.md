@@ -125,6 +125,14 @@ Optional: **add the game's name as a keyword**.
 `/home/deck/.local/share/Steam/userdata/<account>/760/remote` folder to this PC (e.g. with Syncthing) and add the
 synced folder under **Also look in**. Games that aren't installed on this PC are named from the Steam store.
 
+### Import videos from folders
+
+**Video import…** on the toolbar (or **Tools → Import videos from folders…**) brings the videos from the folders
+you list **and all their subfolders** straight into one folder you choose (no subfolders). Network folders work:
+a mapped drive or a `\\server\share` path. Both lists are remembered, and videos imported before are skipped
+(even after you rename or move them), so you can run it whenever you like. It copies by default; tick **Move** to
+remove them from the original folders (files deleted from a network folder can't be restored from the Recycle Bin).
+
 ### Convert (HEIC / WEBP / AVIF → JPG)
 
 Select images and use **Convert…** in the toolbar or right-click → **Convert to JPG…**. Choose JPG (with quality)

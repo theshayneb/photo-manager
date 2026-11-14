@@ -1411,3 +1411,41 @@ def test_steam_mark_older_ones_as_imported(qapp, tmp_path, monkeypatch):
     assert "2</b> will be marked" in dlg._mark_dialog.findChildren(QLabel)[-1].text()
     assert [os.path.basename(shot.path) for shot, _ in dlg.plan] == ["20261104213015_1.jpg"]
     assert [os.path.basename(shot.path) for shot, _ in SteamImportDialog(s).plan] == ["20261104213015_1.jpg"]
+
+
+def test_import_videos_end_to_end(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from photo_manager.ui import main_window as mw
+
+    from .test_folder_import import make_share
+
+    win, folder, _ = window
+    share = make_share(tmp_path / "net")
+    win.settings.video_sources = [str(share)]
+    win.settings.video_dest = str(folder)  # straight into the open folder
+    dlg = mw.VideoImportDialog(win.settings)
+    deadline = time.time() + 5
+    while dlg.scanning and time.time() < deadline:
+        QApplication.processEvents()
+    assert len(dlg.plan) == 3 and "3 new" in dlg.summary.text() and dlg.ok.isEnabled()
+    assert dlg.folders.topLevelItemCount() == 3  # one row per subfolder
+
+    def run_dialog(self):
+        deadline = time.time() + 5
+        while self.scanning and time.time() < deadline:
+            QApplication.processEvents()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(mw.VideoImportDialog, "exec", run_dialog)
+    win.quiet_import = True
+    win.import_videos()
+    win.copy_bg.wait()
+    settle(win)
+    done, failures = win.video_import_result
+    assert len(done) == 3 and not failures
+    assert {"top.mp4", "beach.MOV", "party.mkv"} <= {i.name for i in win.model.all_items}  # shown without F5
+    again = mw.VideoImportDialog(win.settings)
+    while again.scanning:
+        QApplication.processEvents()
+    assert again.plan == [] and "3 imported before" in again.summary.text()

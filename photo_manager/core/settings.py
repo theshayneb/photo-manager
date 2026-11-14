@@ -81,6 +81,9 @@ class Settings:
     steam_set_date: bool = True
     steam_keyword: bool = False
     steam_game_names: dict[str, str] = field(default_factory=dict)  # from the Steam store
+    video_sources: list[str] = field(default_factory=list)  # Import videos: folders to copy from
+    video_dest: str = ""
+    video_move: bool = False
     video_autoplay: bool = False
     label_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LABEL_HOTKEYS))
     convert_target: str = "JPG"

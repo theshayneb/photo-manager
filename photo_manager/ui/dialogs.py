@@ -7,7 +7,7 @@ import os
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QPushButton, QTableWidget, QTableWidgetItem,
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -759,3 +759,206 @@ class SteamImportDialog(QDialog):
         s.steam_set_date = self.set_date.isChecked()
         s.steam_keyword = self.keyword.isChecked()
         self.accept()
+
+
+class _ScanRelay(QObject):
+    """Carries folder-scan results from the scanning thread back to the UI thread."""
+
+    done = Signal(object, int)  # videos, generation
+
+
+class VideoImportDialog(QDialog):
+    """Pick folders (network folders too) to copy videos from, subfolders included,
+    and the folder to put them in. Shows how many are new."""
+
+    def __init__(self, settings, parent: QWidget | None = None):  # type: ignore[no-untyped-def]
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QFormLayout, QTreeWidget
+
+        from ..core import folder_import
+
+        super().__init__(parent)
+        self._fi = folder_import
+        self.settings = settings
+        self.setWindowTitle("Import videos")
+        self.setMinimumWidth(560)
+        layout = QVBoxLayout(self)
+        intro = QLabel("Brings the videos from these folders <b>and all their subfolders</b> straight into the "
+                       "folder you choose. Videos you've already imported are skipped, so you can run it "
+                       "whenever you like. Network folders work too (a mapped drive, or \\\\server\\share).")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        layout.addWidget(QLabel("<b>Get videos from:</b>"))
+        row = QHBoxLayout()
+        self.sources = QListWidget()
+        self.sources.setMaximumHeight(72)
+        for folder in settings.video_sources:
+            self.sources.addItem(folder)
+        row.addWidget(self.sources, 1)
+        col = QVBoxLayout()
+        add = QPushButton("Add folder…")
+        add.clicked.connect(self._add_source)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(self._remove_source)
+        col.addWidget(add)
+        col.addWidget(remove)
+        col.addStretch(1)
+        row.addLayout(col)
+        layout.addLayout(row)
+
+        form = QFormLayout()
+        self.dest = QLineEdit(settings.video_dest)
+        self.dest.setPlaceholderText(r"e.g. C:\Users\you\Pictures\Camera Roll")
+        self.dest.textChanged.connect(lambda _t: self._rescan_timer.start())
+        box = QWidget()
+        dest_row = QHBoxLayout(box)
+        dest_row.setContentsMargins(0, 0, 0, 0)
+        dest_row.addWidget(self.dest, 1)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_dest)
+        dest_row.addWidget(browse)
+        form.addRow("Save into:", box)
+        layout.addLayout(form)
+
+        self.move_box = QCheckBox("Move instead of copy (removes them from the original folders)")
+        self.move_box.setToolTip("Files removed from a network folder don't go to a Recycle Bin.")
+        self.move_box.setChecked(settings.video_move)
+        layout.addWidget(self.move_box)
+
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.folders = QTreeWidget()
+        self.folders.setHeaderLabels(["Folder", "New videos", "Size"])
+        self.folders.setRootIsDecorated(False)
+        self.folders.setMaximumHeight(150)
+        self.folders.setColumnWidth(0, 320)
+        layout.addWidget(self.folders)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.ok.setText("Import")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.videos: list = []
+        self.plan: list = []
+        self.scanning = False
+        self._generation = 0
+        self._relay = _ScanRelay(self)
+        self._relay.done.connect(self._scanned)
+        self._rescan_timer = QTimer(self)  # typing a path: scan once it stops changing
+        self._rescan_timer.setSingleShot(True)
+        self._rescan_timer.setInterval(400)
+        self._rescan_timer.timeout.connect(self._scan)
+        self._scan()
+
+    # -- folders --
+
+    def source_folders(self) -> list[str]:
+        return [self.sources.item(i).text() for i in range(self.sources.count())]
+
+    def log_path(self):  # type: ignore[no-untyped-def]
+        return self.settings.path.parent / "video_imported.txt"
+
+    def _add_source(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Get videos from (subfolders included)")
+        if folder and os.path.normpath(folder) not in self.source_folders():
+            self.sources.addItem(os.path.normpath(folder))
+            self._scan()
+
+    def _remove_source(self) -> None:
+        for item in self.sources.selectedItems():
+            self.sources.takeItem(self.sources.row(item))
+        self._scan()
+
+    def _browse_dest(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Save videos into", self.dest.text())
+        if folder:
+            self.dest.setText(os.path.normpath(folder))
+
+    # -- scanning (in the background: network folders can be slow) --
+
+    def _scan(self) -> None:
+        self._generation += 1
+        generation, relay = self._generation, self._relay
+        folders, dest = self.source_folders(), self.dest.text().strip()
+        self.videos, self.plan = [], []
+        self.folders.clear()
+        self.ok.setEnabled(False)
+        if not folders:
+            self.scanning = False
+            self.summary.setText("Add the folder (or folders) to get videos from.")
+            return
+        self.scanning = True
+        self.summary.setText("Looking for videos… (network folders can take a moment)")
+        import threading
+
+        find = self._fi.find_videos
+
+        def work() -> None:
+            videos = find(folders, dest, cancelled=lambda: generation != self._generation)
+            try:
+                relay.done.emit(videos, generation)
+            except RuntimeError:  # the dialog was closed meanwhile
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _scanned(self, videos: list, generation: int) -> None:
+        if generation != self._generation:
+            return
+        self.videos = videos
+        self.scanning = False
+        self._replan()
+
+    def _replan(self) -> None:
+        dest = self.dest.text().strip()
+        self.folders.clear()
+        n = len(self.videos)
+        text = f"{n} video{'s' if n != 1 else ''} found."
+        if not dest:
+            self.plan = []
+            self.summary.setText(text + " Choose where to save them.")
+            self.ok.setEnabled(False)
+            return
+        self.plan = self._fi.plan_import(self.videos, dest, self._fi.load_log(self.log_path()))
+        done = n - len(self.plan)
+        size = sum(v.size for v, _ in self.plan)
+        text += f" <b>{len(self.plan)} new</b> to import ({_size(size)})"
+        text += f", {done} imported before." if done else "."
+        self.summary.setText(text)
+        by_folder: dict[str, list] = {}
+        for video, _target in self.plan:
+            by_folder.setdefault(os.path.dirname(video.path), []).append(video)
+        from PySide6.QtWidgets import QTreeWidgetItem
+
+        for folder, vids in sorted(by_folder.items()):
+            item = QTreeWidgetItem([folder, str(len(vids)), _size(sum(v.size for v in vids))])
+            item.setToolTip(0, folder)
+            self.folders.addTopLevelItem(item)
+        self.ok.setText(f"Import {len(self.plan)}")
+        self.ok.setEnabled(bool(self.plan))
+
+    def _accept(self) -> None:
+        s = self.settings
+        s.video_sources = self.source_folders()
+        s.video_dest = self.dest.text().strip()
+        s.video_move = self.move_box.isChecked()
+        if s.video_move and QMessageBox.question(
+                self, "Move videos",
+                f"Move {len(self.plan)} videos? They'll be removed from the original folders "
+                "(files on a network folder can't be restored from the Recycle Bin).") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self.accept()
+
+
+def _size(n: int) -> str:
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+        n /= 1024  # type: ignore[assignment]
+    return ""

@@ -54,6 +54,7 @@ from .dialogs import (
     MoveDialog,
     RenameDialog,
     SteamImportDialog,
+    VideoImportDialog,
     TemplateDialog,
 )
 from .folders import FavoritesList, FolderTree
@@ -97,6 +98,8 @@ class MainWindow(QMainWindow):
         self.et = exiftool
         self.exiftool_ok = exiftool is not None
         self.bg = Background(threads=1)  # ExifTool and file operations run one at a time
+        self.copy_bg = Background(threads=1)  # long imports, so they don't hold up saving labels etc.
+        self._stop_imports = False
         self.setWindowTitle("Photo Manager")
         self.resize(1400, 900)
         self.setStyleSheet(STYLE)
@@ -308,6 +311,8 @@ class MainWindow(QMainWindow):
             ("Move to…", "Ctrl+M", "Move selected files to another folder (Ctrl+M)", self.move_selected),
             ("Convert…", "", "Convert selected images to JPG or PNG", self.convert_selected),
             ("Steam import…", "", "Import new Steam screenshots (also on Tools menu)", self.import_steam),
+            ("Video import…", "", "Import new videos from folders and their subfolders, e.g. a network "
+             "folder (also on Tools menu)", self.import_videos),
             ("Delete", "", "Send selected files to the Recycle Bin (Delete)", self.delete_selected),
             ("Show in Explorer", "Ctrl+E", "Show in Windows Explorer (Ctrl+E)", self.show_in_explorer),
             ("Open", "Ctrl+O", "Open in the default Windows app (Ctrl+O)", self.open_external_selected),
@@ -322,6 +327,7 @@ class MainWindow(QMainWindow):
     def _build_menus(self) -> None:
         tools = self.menuBar().addMenu("&Tools")
         tools.addAction("Import Steam screenshots…", self.import_steam)
+        tools.addAction("Import videos from folders…", self.import_videos)
         view = self.menuBar().addMenu("&View")
 
         panels = view.addMenu("Sidebar panels")
@@ -630,6 +636,58 @@ class MainWindow(QMainWindow):
         self.status.setText(text)
 
     # --------------------------------------------------------------- steam
+
+    def import_videos(self) -> None:
+        dlg = VideoImportDialog(self.settings, self)
+        if not dlg.exec() or not dlg.plan:
+            return
+        self.settings.save()
+        from ..core import folder_import
+
+        plan, move, log = dlg.plan, self.settings.video_move, dlg.log_path()
+        dest = self.settings.video_dest
+        verb = "Moving" if move else "Copying"
+        state = {"text": f"{verb} {len(plan)} video(s)…"}
+
+        def progress(n: int, total: int, name: str) -> None:  # runs on the worker thread
+            state["text"] = f"{verb} video {n + 1} of {total}: {name}"
+
+        ticker = QTimer(self)
+        ticker.timeout.connect(lambda: self.status.setText(state["text"]))
+        ticker.start(300)
+
+        def work():  # type: ignore[no-untyped-def]
+            done, failures = folder_import.import_files(plan, move, progress, lambda: self._stop_imports)
+            folder_import.add_to_log(log, {folder_import.file_key(os.path.basename(v.path), v.size)
+                                           for v, _ in done})
+            return done, failures
+
+        def finished(result, error: str | None) -> None:  # type: ignore[no-untyped-def]
+            ticker.stop()
+            ticker.deleteLater()
+            if error:
+                QMessageBox.warning(self, "Import videos", error)
+                return
+            done, failures = result
+            self.video_import_result = (done, failures)
+            here = os.path.normcase(os.path.normpath(self.model.folder or ""))
+            if any(os.path.normcase(os.path.dirname(t)) == here for _, t in done):
+                self.sync_folder()
+            self.status.setText(f"Imported {len(done)} video(s) into {dest}")
+            if getattr(self, "quiet_import", False):
+                return
+            text = f"{'Moved' if move else 'Copied'} {len(done)} video{'s' if len(done) != 1 else ''} into:\n{dest}"
+            if failures:
+                text += f"\n\n{len(failures)} couldn't be {'moved' if move else 'copied'}:\n" + "\n".join(
+                    f"{os.path.basename(p)}: {e}" for p, e in failures[:5])
+            box = QMessageBox(QMessageBox.Icon.Information, "Import videos", text,
+                              QMessageBox.StandardButton.Close, self)
+            open_btn = box.addButton("Open that folder", QMessageBox.ButtonRole.AcceptRole)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                self.open_folder(dest)
+
+        self.copy_bg.run(work, finished)
 
     def import_steam(self) -> None:
         dlg = SteamImportDialog(self.settings, self)
@@ -1448,6 +1506,8 @@ class MainWindow(QMainWindow):
             pass
         self.preview.video.shutdown()
         self.model.shutdown()  # thumbnail threads must be finished before Qt is torn down
+        self._stop_imports = True  # a video import stops after the file it's copying
+        self.copy_bg.shutdown(-1)
         self.bg.shutdown(10_000)  # results arriving after this point are dropped
         if self.et:
             self.et.close()

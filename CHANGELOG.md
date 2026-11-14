@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0
+
+- **Video import…** (toolbar, and Tools → Import videos from folders…): brings the videos from one or more
+  folders **and all their subfolders** (network folders too) straight into the folder you choose. Both are
+  remembered. Videos imported before are skipped, even after you rename or move them, so each run only brings in
+  new ones. Copies by default; tick **Move** to remove them from the original folders. Searching runs in the
+  background, and the copy shows its progress in the status bar without holding up the rest of the app.
+  NAS housekeeping folders (`@eaDir`, `#recycle`) are skipped.
+
 ## 0.11.2
 
 - Steam import: **Mark older ones as imported…** for screenshots you already have but moved out of the import
